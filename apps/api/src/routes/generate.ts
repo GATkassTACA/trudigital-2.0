@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { ImageGenerator, SIGNAGE_PRESETS, SignagePreset } from '@trudigital/ai-service';
+import { ImageGenerator, SIGNAGE_PRESETS, SignagePreset } from '../services/ai';
 import { PrismaClient } from '@prisma/client';
 import { authMiddleware } from '../middleware/auth';
 import { enhancePrompt, analyzeIntent } from '../services/promptEnhancer';
@@ -42,12 +42,13 @@ router.post('/', authMiddleware, async (req, res, next) => {
 
     if (input.enhance) {
       console.log('Enhancing prompt with AI reasoning...');
+      const presetKey = (input.preset || 'landscape-standard') as SignagePreset;
       enhancement = await enhancePrompt({
         userPrompt: input.prompt,
         signageType: input.preset,
         brandColors: org?.brandColors || [],
         brandName: org?.name,
-        targetSize: input.size || SIGNAGE_PRESETS[input.preset || 'landscape-standard'].size,
+        targetSize: input.size || SIGNAGE_PRESETS[presetKey].size,
         style: input.style
       });
 
@@ -187,7 +188,8 @@ router.get('/presets', (req, res) => {
   res.json({
     presets: Object.entries(SIGNAGE_PRESETS).map(([key, value]) => ({
       id: key,
-      ...value
+      size: value.size,
+      style: value.style
     }))
   });
 });
