@@ -103,6 +103,9 @@ export default function EnhancedEditor({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const historyRef = useRef<string[]>([]);
   const historyIndexRef = useRef(-1);
+  const initializedRef = useRef(false);
+  const currentDimensionsRef = useRef({ width: 0, height: 0 });
+  const lastBackgroundRef = useRef<string | undefined>(undefined);
 
   const [isLoaded, setIsLoaded] = useState(false);
   const [imageLoading, setImageLoading] = useState(false);
@@ -159,6 +162,30 @@ export default function EnhancedEditor({
   useEffect(() => {
     if (!isLoaded || !canvasRef.current || !fabricRef.current) return;
 
+    // Check if we need to recreate the canvas (dimensions changed or first init)
+    const dimensionsChanged =
+      currentDimensionsRef.current.width !== width ||
+      currentDimensionsRef.current.height !== height;
+
+    if (initializedRef.current && !dimensionsChanged && fabricCanvasRef.current) {
+      // Canvas already exists with same dimensions, just update scale
+      const updateScale = () => {
+        if (containerRef.current) {
+          const containerWidth = containerRef.current.offsetWidth - 48;
+          setScale(Math.min(1, containerWidth / width));
+        }
+      };
+      updateScale();
+      return;
+    }
+
+    // Dispose old canvas if dimensions changed
+    if (fabricCanvasRef.current && dimensionsChanged) {
+      fabricCanvasRef.current.dispose();
+      fabricCanvasRef.current = null;
+      initializedRef.current = false;
+    }
+
     const fabric = fabricRef.current;
     const canvas = new fabric.Canvas(canvasRef.current, {
       width,
@@ -169,6 +196,8 @@ export default function EnhancedEditor({
     });
 
     fabricCanvasRef.current = canvas;
+    initializedRef.current = true;
+    currentDimensionsRef.current = { width, height };
 
     canvas.on('selection:created', (e: any) => {
       setSelectedObject(e.selected?.[0] || null);
@@ -199,14 +228,20 @@ export default function EnhancedEditor({
     saveState();
 
     return () => {
-      canvas.dispose();
       window.removeEventListener('resize', updateScale);
+      // Don't dispose canvas on cleanup - only dispose when dimensions change
     };
   }, [isLoaded, width, height, saveState]);
 
   // Load background image
   useEffect(() => {
     if (!isLoaded || !fabricCanvasRef.current || !fabricRef.current || !backgroundImage) return;
+
+    // Skip if background hasn't changed
+    if (lastBackgroundRef.current === backgroundImage) {
+      return;
+    }
+    lastBackgroundRef.current = backgroundImage;
 
     const fabric = fabricRef.current;
     const canvas = fabricCanvasRef.current;
