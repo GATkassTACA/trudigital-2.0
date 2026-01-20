@@ -11,11 +11,17 @@ import {
   Settings,
   Copy,
   ExternalLink,
-  Link
+  Link,
+  ListVideo
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { displays } from '@/lib/api';
+import { displays, playlists } from '@/lib/api';
 import { cn, formatDate } from '@/lib/utils';
+
+interface Playlist {
+  id: string;
+  name: string;
+}
 
 interface Display {
   id: string;
@@ -27,17 +33,21 @@ interface Display {
   status: string;
   lastSeenAt: string | null;
   location: string | null;
-  playlist?: { name: string } | null;
+  playlistId: string | null;
+  playlist?: { id: string; name: string } | null;
 }
 
 export default function DisplaysPage() {
   const [items, setItems] = useState<Display[]>([]);
+  const [allPlaylists, setAllPlaylists] = useState<Playlist[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
   const [newDisplay, setNewDisplay] = useState({ name: '', location: '' });
+  const [assigningPlaylist, setAssigningPlaylist] = useState<string | null>(null);
 
   useEffect(() => {
     loadDisplays();
+    loadPlaylists();
   }, []);
 
   const loadDisplays = async () => {
@@ -48,6 +58,30 @@ export default function DisplaysPage() {
       toast.error('Failed to load displays');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadPlaylists = async () => {
+    try {
+      const { data } = await playlists.list();
+      setAllPlaylists(data.playlists || []);
+    } catch (error) {
+      console.error('Failed to load playlists');
+    }
+  };
+
+  const assignPlaylist = async (displayId: string, playlistId: string | null) => {
+    try {
+      await displays.update(displayId, { playlistId });
+      setItems(items.map(d =>
+        d.id === displayId
+          ? { ...d, playlistId, playlist: playlistId ? allPlaylists.find(p => p.id === playlistId) || null : null }
+          : d
+      ));
+      setAssigningPlaylist(null);
+      toast.success(playlistId ? 'Playlist assigned!' : 'Playlist removed');
+    } catch (error) {
+      toast.error('Failed to assign playlist');
     }
   };
 
@@ -209,12 +243,31 @@ export default function DisplaysPage() {
                   </div>
                 )}
 
-                {display.playlist && (
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-gray-400">Playlist</span>
-                    <span className="text-white">{display.playlist.name}</span>
-                  </div>
-                )}
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-gray-400">Playlist</span>
+                  {assigningPlaylist === display.id ? (
+                    <select
+                      value={display.playlistId || ''}
+                      onChange={(e) => assignPlaylist(display.id, e.target.value || null)}
+                      onBlur={() => setAssigningPlaylist(null)}
+                      autoFocus
+                      className="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-white text-sm focus:outline-none focus:border-brand-500"
+                    >
+                      <option value="">No playlist</option>
+                      {allPlaylists.map((p) => (
+                        <option key={p.id} value={p.id}>{p.name}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <button
+                      onClick={() => setAssigningPlaylist(display.id)}
+                      className="flex items-center gap-1 text-gray-300 hover:text-white transition"
+                    >
+                      <ListVideo className="w-3 h-3" />
+                      {display.playlist?.name || 'Assign playlist'}
+                    </button>
+                  )}
+                </div>
 
                 {display.lastSeenAt && (
                   <div className="flex items-center justify-between text-sm">
