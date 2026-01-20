@@ -1,0 +1,298 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// ACCOUNTS & USERS
+// ============================================
+
+model Organization {
+  id            String   @id @default(cuid())
+  name          String
+  slug          String   @unique
+  plan          Plan     @default(FREE)
+
+  // Brand settings
+  brandColors   String[] @default([])
+  logoUrl       String?
+
+  // Billing
+  stripeCustomerId String?
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  users         User[]
+  displays      Display[]
+  content       Content[]
+  folders       Folder[]
+  generations   Generation[]
+  playlists     Playlist[]
+}
+
+enum Plan {
+  FREE
+  STARTER
+  PROFESSIONAL
+  ENTERPRISE
+}
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  passwordHash  String
+  name          String?
+  role          Role     @default(MEMBER)
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  content       Content[]
+  generations   Generation[]
+
+  @@index([organizationId])
+}
+
+enum Role {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+// ============================================
+// AI GENERATION
+// ============================================
+
+model Generation {
+  id            String   @id @default(cuid())
+  prompt        String
+  negativePrompt String?
+
+  // Settings
+  size          String
+  style         String?
+  preset        String?
+
+  // Result
+  status        GenerationStatus @default(PENDING)
+  imageUrl      String?
+  thumbnailUrl  String?
+  seed          BigInt?
+
+  // Cost tracking
+  creditsUsed   Int      @default(0)
+  provider      String   @default("stability")
+
+  // Relations
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  userId        String
+  user          User     @relation(fields: [userId], references: [id])
+
+  // If saved to content library
+  contentId     String?  @unique
+  content       Content? @relation(fields: [contentId], references: [id])
+
+  createdAt     DateTime @default(now())
+
+  @@index([organizationId])
+  @@index([userId])
+}
+
+enum GenerationStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+// ============================================
+// CONTENT LIBRARY
+// ============================================
+
+model Folder {
+  id            String   @id @default(cuid())
+  name          String
+  parentId      String?
+  parent        Folder?  @relation("FolderHierarchy", fields: [parentId], references: [id])
+  children      Folder[] @relation("FolderHierarchy")
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  content       Content[]
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([parentId])
+}
+
+model Content {
+  id            String   @id @default(cuid())
+  name          String
+  type          ContentType
+
+  // Source
+  url           String          // Full resolution
+  thumbnailUrl  String?
+
+  // Metadata
+  width         Int?
+  height        Int?
+  duration      Int?            // For video, in seconds
+  fileSize      Int?
+  mimeType      String?
+
+  // AI-generated content
+  isGenerated   Boolean  @default(false)
+  generation    Generation?
+
+  // Organization
+  folderId      String?
+  folder        Folder?  @relation(fields: [folderId], references: [id])
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  userId        String
+  user          User     @relation(fields: [userId], references: [id])
+
+  // Playlists
+  playlistItems PlaylistItem[]
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([folderId])
+}
+
+enum ContentType {
+  IMAGE
+  VIDEO
+  WEBPAGE
+}
+
+// ============================================
+// DISPLAYS
+// ============================================
+
+model Display {
+  id            String   @id @default(cuid())
+  name          String
+
+  // Device info
+  deviceKey     String   @unique @default(cuid())  // For device auth
+  model         String?
+  serialNumber  String?
+
+  // Screen settings
+  orientation   Orientation @default(LANDSCAPE)
+  width         Int      @default(1920)
+  height        Int      @default(1080)
+
+  // Status
+  status        DisplayStatus @default(OFFLINE)
+  lastSeenAt    DateTime?
+  ipAddress     String?
+  appVersion    String?
+
+  // Location
+  location      String?
+  timezone      String   @default("America/New_York")
+
+  // What's playing
+  playlistId    String?
+  playlist      Playlist? @relation(fields: [playlistId], references: [id])
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([deviceKey])
+}
+
+enum Orientation {
+  LANDSCAPE
+  PORTRAIT
+}
+
+enum DisplayStatus {
+  ONLINE
+  OFFLINE
+  ERROR
+}
+
+// ============================================
+// PLAYLISTS & SCHEDULING
+// ============================================
+
+model Playlist {
+  id            String   @id @default(cuid())
+  name          String
+
+  // Scheduling
+  isDefault     Boolean  @default(false)
+  scheduleType  ScheduleType @default(ALWAYS)
+  scheduleData  Json?    // For custom schedules
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  // Content
+  items         PlaylistItem[]
+
+  // Displays using this playlist
+  displays      Display[]
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([organizationId])
+}
+
+enum ScheduleType {
+  ALWAYS
+  DATETIME_RANGE
+  RECURRING
+  CUSTOM
+}
+
+model PlaylistItem {
+  id            String   @id @default(cuid())
+
+  playlistId    String
+  playlist      Playlist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
+
+  contentId     String
+  content       Content  @relation(fields: [contentId], references: [id], onDelete: Cascade)
+
+  // Display settings
+  duration      Int      @default(10)  // Seconds to show
+  order         Int      @default(0)
+
+  // Transition
+  transition    String   @default("fade")
+
+  createdAt     DateTime @default(now())
+
+  @@index([playlistId])
+  @@index([contentId])
+}
