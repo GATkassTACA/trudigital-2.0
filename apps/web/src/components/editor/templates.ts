@@ -516,4 +516,4 @@ export const TEMPLATES: Template[] = [
   }
 ];
 
-export const TEMPLATE_CATEGORIES = [...new Set(TEMPLATES.map(t => t.category))];
+export const TEMPLATE_CATEGORIES = Array.from(new Set(TEMPLATES.map(t => t.category)));
