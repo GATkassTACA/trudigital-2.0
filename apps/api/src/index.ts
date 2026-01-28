@@ -62,6 +62,19 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// Debug endpoint to check env vars (remove in production later)
+app.get('/debug/env', (req, res) => {
+  res.json({
+    hasAnthropicKey: !!process.env.ANTHROPIC_API_KEY,
+    anthropicKeyPrefix: process.env.ANTHROPIC_API_KEY?.substring(0, 12) || 'NOT SET',
+    hasStabilityKey: !!process.env.STABILITY_API_KEY,
+    stabilityKeyPrefix: process.env.STABILITY_API_KEY?.substring(0, 12) || 'NOT SET',
+    hasBlobToken: !!process.env.BLOB_READ_WRITE_TOKEN,
+    hasDbUrl: !!process.env.DATABASE_URL,
+    nodeEnv: process.env.NODE_ENV
+  });
+});
+
 // Routes
 app.use('/api/auth', authLimiter, authRoutes);
 app.use('/api/generate', generateRoutes);
