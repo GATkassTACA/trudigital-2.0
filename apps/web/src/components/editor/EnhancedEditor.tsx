@@ -781,7 +781,24 @@ export default function EnhancedEditor({
     fabricCanvasRef.current.remove(selectedObject);
     fabricCanvasRef.current.renderAll();
     setSelectedObject(null);
-  }, [selectedObject]);
+    saveState();
+  }, [selectedObject, saveState]);
+
+  // Keyboard shortcuts for delete
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't delete if user is typing in an input/textarea
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedObject && !selectedObject._isBackground) {
+        e.preventDefault();
+        deleteSelected();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedObject, deleteSelected]);
 
   const duplicateSelected = useCallback(() => {
     if (!fabricCanvasRef.current || !selectedObject) return;
