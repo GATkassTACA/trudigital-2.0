@@ -869,9 +869,9 @@ export default function EnhancedEditor({
   const filteredTemplates = selectedCategory ? TEMPLATES.filter(t => t.category === selectedCategory) : TEMPLATES;
 
   return (
-    <div className="flex gap-4">
+    <div className="relative">
       {/* Main Editor */}
-      <div className="flex-1 flex flex-col gap-4">
+      <div className="flex flex-col gap-4">
         {/* Toolbar */}
         <div className="bg-gray-800 rounded-lg p-3 flex flex-wrap items-center gap-2">
           {/* Undo/Redo */}
@@ -1177,9 +1177,9 @@ export default function EnhancedEditor({
         </div>
       </div>
 
-      {/* Copy Assist Sidebar */}
+      {/* Copy Assist Sidebar - Overlay Panel */}
       {showCopyAssist && (
-        <div className="w-80 bg-gray-800 rounded-lg p-4 flex flex-col gap-4 max-h-[800px] overflow-y-auto">
+        <div className="absolute top-0 right-0 w-80 bg-gray-800 rounded-lg p-4 flex flex-col gap-4 max-h-[calc(100vh-200px)] overflow-y-auto shadow-2xl border border-gray-700 z-30">
           <div className="flex items-center justify-between">
             <h3 className="text-lg font-medium text-white flex items-center gap-2">
               <Sparkles className="w-5 h-5 text-green-400" />
