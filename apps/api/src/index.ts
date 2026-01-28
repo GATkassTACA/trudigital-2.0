@@ -15,6 +15,9 @@ import weatherRoutes from './routes/weather';
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Trust proxy for Vercel/cloud deployments (needed for rate limiting)
+app.set('trust proxy', 1);
+
 // Allowed origins for CORS
 const allowedOrigins = [
   'http://localhost:3000',
