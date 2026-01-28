@@ -6,6 +6,7 @@ import { join } from 'path';
 
 import authRoutes from './routes/auth';
 import generateRoutes from './routes/generate';
+import editRoutes from './routes/edit';
 import contentRoutes from './routes/content';
 import displayRoutes from './routes/displays';
 import playlistRoutes from './routes/playlists';
@@ -51,7 +52,7 @@ app.use(cors({
   credentials: true
 }));
 app.use(limiter);
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '50mb' })); // Larger limit for base64 images
 
 // Serve uploaded files
 app.use('/uploads', express.static(join(process.cwd(), 'uploads')));
@@ -64,6 +65,7 @@ app.get('/health', (req, res) => {
 // Routes
 app.use('/api/auth', authLimiter, authRoutes);
 app.use('/api/generate', generateRoutes);
+app.use('/api/edit', editRoutes);
 app.use('/api/content', contentRoutes);
 app.use('/api/displays', displayRoutes);
 app.use('/api/playlists', playlistRoutes);

@@ -80,15 +80,19 @@ model Generation {
   negativePrompt String?
 
   // Settings
-  size          String
+  size          String?
   style         String?
   preset        String?
+  quality       String?  // 'standard' or 'ultra'
 
   // Result
   status        GenerationStatus @default(PENDING)
   imageUrl      String?
   thumbnailUrl  String?
   seed          BigInt?
+
+  // Video-specific
+  metadata      String?  // JSON for video generation params
 
   // Cost tracking
   creditsUsed   Int      @default(0)

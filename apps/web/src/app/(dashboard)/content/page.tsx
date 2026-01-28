@@ -10,11 +10,14 @@ import {
   Grid,
   List,
   Sparkles,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Upload,
+  X
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { content } from '@/lib/api';
 import { cn, formatDate } from '@/lib/utils';
+import FileUpload from '@/components/FileUpload';
 
 interface ContentItem {
   id: string;
@@ -41,6 +44,7 @@ export default function ContentPage() {
   const [search, setSearch] = useState('');
   const [view, setView] = useState<'grid' | 'list'>('grid');
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+  const [showUpload, setShowUpload] = useState(false);
 
   useEffect(() => {
     loadContent();
@@ -86,7 +90,38 @@ export default function ContentPage() {
             Manage your images and media
           </p>
         </div>
+        <button
+          onClick={() => setShowUpload(true)}
+          className="flex items-center gap-2 bg-brand-500 hover:bg-brand-600 text-white font-medium px-4 py-2 rounded-lg transition"
+        >
+          <Upload className="w-5 h-5" />
+          Upload
+        </button>
       </div>
+
+      {/* Upload Modal */}
+      {showUpload && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/70" onClick={() => setShowUpload(false)} />
+          <div className="relative bg-gray-800 rounded-xl border border-gray-700 p-6 w-full max-w-lg">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-white">Upload Files</h2>
+              <button
+                onClick={() => setShowUpload(false)}
+                className="p-1 text-gray-400 hover:text-white transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <FileUpload
+              onUploadComplete={(result) => {
+                setItems([result.content, ...items]);
+                setShowUpload(false);
+              }}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Toolbar */}
       <div className="flex items-center gap-4 mb-6">

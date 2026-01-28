@@ -41,6 +41,11 @@ const STYLES = [
   { id: 'neon-punk', name: 'Neon' },
 ];
 
+const QUALITY_TIERS = [
+  { id: 'standard', name: 'Standard', description: 'SDXL - Fast & reliable', badge: null },
+  { id: 'ultra', name: 'Ultra', description: 'SD3.5 Large - Best quality', badge: 'PRO' },
+];
+
 interface GeneratedImage {
   id: string;
   url: string;
@@ -72,6 +77,7 @@ export default function StudioPage() {
   };
   const [preset, setPreset] = useState('landscape-standard');
   const [style, setStyle] = useState('photographic');
+  const [quality, setQuality] = useState<'standard' | 'ultra'>('standard');
   const [loading, setLoading] = useState(false);
   const [images, setImages] = useState<GeneratedImage[]>([]);
   const [selectedImage, setSelectedImage] = useState<GeneratedImage | null>(null);
@@ -97,6 +103,7 @@ export default function StudioPage() {
         prompt,
         preset,
         style,
+        quality,
         samples: 4,
         saveToLibrary: false,
         enhance: smartPrompts,
@@ -132,6 +139,7 @@ export default function StudioPage() {
         prompt: image.prompt || prompt,
         preset,
         style,
+        quality,
         samples: 1,
         saveToLibrary: true,
       });
@@ -371,6 +379,35 @@ export default function StudioPage() {
                     )}
                   >
                     {s.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Quality Tier */}
+            <div className="bg-gray-800 rounded-xl p-6 border border-gray-700">
+              <label className="block text-sm font-medium text-gray-300 mb-3">
+                Quality
+              </label>
+              <div className="grid grid-cols-2 gap-3">
+                {QUALITY_TIERS.map((q) => (
+                  <button
+                    key={q.id}
+                    onClick={() => setQuality(q.id as 'standard' | 'ultra')}
+                    className={cn(
+                      'relative flex flex-col items-start p-4 rounded-lg border transition',
+                      quality === q.id
+                        ? 'bg-brand-500/20 border-brand-500 text-white'
+                        : 'bg-gray-900 border-gray-700 text-gray-400 hover:border-gray-600'
+                    )}
+                  >
+                    {q.badge && (
+                      <span className="absolute top-2 right-2 px-2 py-0.5 bg-gradient-to-r from-purple-500 to-pink-500 text-white text-xs font-bold rounded">
+                        {q.badge}
+                      </span>
+                    )}
+                    <span className="font-medium">{q.name}</span>
+                    <span className="text-xs opacity-60 mt-1">{q.description}</span>
                   </button>
                 ))}
               </div>

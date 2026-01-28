@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { ImageGenerator, SIGNAGE_PRESETS, SignagePreset } from '../services/ai';
+import { ImageGenerator, SIGNAGE_PRESETS, VIDEO_PRESETS, SignagePreset } from '../services/ai';
 import { PrismaClient } from '@prisma/client';
 import { authMiddleware } from '../middleware/auth';
 import { enhancePrompt, analyzeIntent } from '../services/promptEnhancer';
@@ -20,7 +20,17 @@ const GenerateSchema = z.object({
   style: z.string().optional(),
   samples: z.number().min(1).max(4).optional(),
   saveToLibrary: z.boolean().optional(),
-  enhance: z.boolean().optional() // Enable AI prompt enhancement
+  enhance: z.boolean().optional(), // Enable AI prompt enhancement
+  quality: z.enum(['standard', 'ultra']).optional() // Quality tier: standard (SDXL) or ultra (SD3.5 Large)
+});
+
+// Video generation schema
+const VideoGenerateSchema = z.object({
+  image: z.string().min(1), // Base64 image or data URL
+  seed: z.number().optional(),
+  cfgScale: z.number().min(0).max(10).optional(),
+  motionBucketId: z.number().min(1).max(255).optional(),
+  saveToLibrary: z.boolean().optional()
 });
 
 // Generate images
@@ -88,7 +98,8 @@ router.post('/', authMiddleware, async (req, res, next) => {
       style: finalStyle as any,
       samples: input.samples,
       brandColors: org?.brandColors || [],
-      brandName: org?.name
+      brandName: org?.name,
+      quality: input.quality || 'standard'
     });
 
     if (!result.success) {
@@ -201,6 +212,145 @@ router.get('/balance', authMiddleware, async (req, res, next) => {
     res.json({ balance });
   } catch (error) {
     next(error);
+  }
+});
+
+// Get video presets (must be before parameterized route)
+router.get('/video/presets', (req, res) => {
+  res.json({
+    presets: Object.entries(VIDEO_PRESETS).map(([key, value]) => ({
+      id: key,
+      size: value.size,
+      description: key.replace('video-', '').replace('-', ' ')
+    })),
+    info: {
+      maxDuration: 4,
+      supportedSizes: ['1024x576 (landscape)', '576x1024 (portrait)', '768x768 (square)'],
+      note: 'Video generation takes 2-3 minutes. Use an image with one of the supported sizes for best results.'
+    }
+  });
+});
+
+// Generate video from image (Stable Video Diffusion)
+router.post('/video', authMiddleware, async (req, res, next) => {
+  try {
+    const { user } = req as any;
+    const input = VideoGenerateSchema.parse(req.body);
+
+    // Start video generation (async)
+    const result = await generator.generateVideo({
+      image: input.image,
+      seed: input.seed,
+      cfgScale: input.cfgScale,
+      motionBucketId: input.motionBucketId
+    });
+
+    if (!result.success) {
+      return res.status(400).json({
+        error: result.error || 'Video generation failed'
+      });
+    }
+
+    // Store the generation ID for polling
+    const generation = await prisma.generation.create({
+      data: {
+        prompt: 'video-generation',
+        status: 'PROCESSING',
+        organizationId: user.organizationId,
+        userId: user.id,
+        provider: 'stability-video',
+        metadata: JSON.stringify({
+          type: 'video',
+          generationId: result.generationId,
+          seed: input.seed,
+          cfgScale: input.cfgScale,
+          motionBucketId: input.motionBucketId
+        })
+      }
+    });
+
+    res.json({
+      success: true,
+      generationId: result.generationId,
+      internalId: generation.id,
+      status: 'processing',
+      message: 'Video generation started. Poll /generate/video/:generationId for result.'
+    });
+  } catch (error: any) {
+    console.error('Video generate error:', error);
+    res.status(500).json({
+      error: error.message || 'Video generation failed'
+    });
+  }
+});
+
+// Poll for video generation result
+router.get('/video/:generationId', authMiddleware, async (req, res, next) => {
+  try {
+    const { user } = req as any;
+    const { generationId } = req.params;
+    const { saveToLibrary } = req.query;
+
+    const result = await generator.getVideoResult(generationId);
+
+    if (!result.success) {
+      return res.status(400).json({
+        error: result.error || 'Failed to get video result',
+        status: result.status
+      });
+    }
+
+    // Still processing
+    if (result.status === 'processing') {
+      return res.json({
+        success: true,
+        status: 'processing',
+        message: 'Video is still being generated. Please poll again.'
+      });
+    }
+
+    // Completed - optionally save to library
+    let content = null;
+    if (saveToLibrary === 'true' && result.video) {
+      content = await prisma.content.create({
+        data: {
+          name: `Generated Video ${new Date().toISOString()}`,
+          type: 'VIDEO',
+          url: result.video.url,
+          thumbnailUrl: '', // Could extract first frame
+          isGenerated: true,
+          duration: result.video.duration,
+          organizationId: user.organizationId,
+          userId: user.id
+        }
+      });
+    }
+
+    // Update generation record
+    await prisma.generation.updateMany({
+      where: {
+        organizationId: user.organizationId,
+        metadata: { contains: generationId }
+      },
+      data: {
+        status: 'COMPLETED',
+        creditsUsed: result.creditsUsed,
+        imageUrl: result.video?.url
+      }
+    });
+
+    res.json({
+      success: true,
+      status: 'completed',
+      video: result.video,
+      creditsUsed: result.creditsUsed,
+      content
+    });
+  } catch (error: any) {
+    console.error('Video result error:', error);
+    res.status(500).json({
+      error: error.message || 'Failed to get video result'
+    });
   }
 });
 

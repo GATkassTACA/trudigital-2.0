@@ -1,11 +1,17 @@
 import {
   AIProvider,
+  VideoProvider,
   GenerateImageOptions,
   GenerationResult,
+  GenerateVideoOptions,
+  VideoGenerationResult,
   ImageSize,
-  ImageStyle
+  ImageStyle,
+  QualityTier,
+  VideoSize
 } from './types';
 import { StabilityAI } from './stability';
+import { StabilityV2 } from './stabilityV2';
 
 // Signage-specific presets
 export const SIGNAGE_PRESETS = {
@@ -27,7 +33,15 @@ export const SIGNAGE_PRESETS = {
   'event-poster': { size: '768x1344' as ImageSize, style: 'cinematic' as ImageStyle },
 } as const;
 
+// Video-compatible presets (must match SVD requirements)
+export const VIDEO_PRESETS = {
+  'video-landscape': { size: '1024x576' as VideoSize },
+  'video-portrait': { size: '576x1024' as VideoSize },
+  'video-square': { size: '768x768' as VideoSize },
+} as const;
+
 export type SignagePreset = keyof typeof SIGNAGE_PRESETS;
+export type VideoPreset = keyof typeof VIDEO_PRESETS;
 
 export interface SignageGenerateOptions extends Omit<GenerateImageOptions, 'size' | 'style'> {
   preset?: SignagePreset;
@@ -36,23 +50,29 @@ export interface SignageGenerateOptions extends Omit<GenerateImageOptions, 'size
   brandColors?: string[];       // Hex colors to incorporate
   brandName?: string;           // Company name to include
   includeText?: string;         // Text overlay to add
+  quality?: QualityTier;        // 'standard' (SDXL) or 'ultra' (SD3.5 Large)
 }
 
 export class ImageGenerator {
-  private provider: AIProvider;
+  private standardProvider: AIProvider;
+  private ultraProvider: AIProvider & VideoProvider;
 
-  constructor(provider: AIProvider) {
-    this.provider = provider;
+  constructor(standardProvider: AIProvider, ultraProvider: AIProvider & VideoProvider) {
+    this.standardProvider = standardProvider;
+    this.ultraProvider = ultraProvider;
   }
 
-  // Factory methods for different providers
+  // Factory method - creates generator with both standard and ultra providers
   static withStability(apiKey: string): ImageGenerator {
-    return new ImageGenerator(new StabilityAI(apiKey));
+    return new ImageGenerator(
+      new StabilityAI(apiKey),
+      new StabilityV2(apiKey)
+    );
   }
 
-  // Main generation method
+  // Main generation method with quality tier support
   async generate(options: SignageGenerateOptions): Promise<GenerationResult> {
-    const { preset, brandColors, brandName, includeText, ...rest } = options;
+    const { preset, brandColors, brandName, includeText, quality = 'standard', ...rest } = options;
 
     // Apply preset if specified
     let size = rest.size;
@@ -88,12 +108,16 @@ export class ImageGenerator {
       'distorted'
     ].filter(Boolean).join(', ');
 
-    return this.provider.generate({
+    // Choose provider based on quality tier
+    const provider = quality === 'ultra' ? this.ultraProvider : this.standardProvider;
+
+    return provider.generate({
       ...rest,
       prompt: enhancedPrompt,
       negativePrompt,
       size: size || '1344x768',  // Default to landscape for signage
-      style: style || 'photographic'
+      style: style || 'photographic',
+      quality
     });
   }
 
@@ -137,10 +161,20 @@ export class ImageGenerator {
     });
   }
 
+  // Generate video from an image (Stable Video Diffusion)
+  async generateVideo(options: GenerateVideoOptions): Promise<VideoGenerationResult> {
+    return this.ultraProvider.generateVideo(options);
+  }
+
+  // Poll for video generation result
+  async getVideoResult(generationId: string): Promise<VideoGenerationResult> {
+    return this.ultraProvider.getVideoResult(generationId);
+  }
+
   // Get provider balance (if supported)
   async getBalance(): Promise<number> {
-    if (this.provider.getBalance) {
-      return this.provider.getBalance();
+    if (this.ultraProvider.getBalance) {
+      return this.ultraProvider.getBalance();
     }
     return -1;
   }

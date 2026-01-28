@@ -1,18 +1,28 @@
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { authMiddleware } from '../middleware/auth';
-import { writeFileSync, mkdirSync, existsSync } from 'fs';
-import { join } from 'path';
+import { put, del } from '@vercel/blob';
 import { randomUUID } from 'crypto';
+import multer from 'multer';
 
 const router = Router();
 const prisma = new PrismaClient();
 
-// Ensure uploads directory exists
-const UPLOADS_DIR = join(process.cwd(), 'uploads');
-if (!existsSync(UPLOADS_DIR)) {
-  mkdirSync(UPLOADS_DIR, { recursive: true });
-}
+// Configure multer for memory storage (files stored in buffer)
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 50 * 1024 * 1024, // 50MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'video/mp4', 'video/webm'];
+    if (allowedTypes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Invalid file type. Allowed: JPEG, PNG, WebP, GIF, MP4, WebM'));
+    }
+  }
+});
 
 // Upload content (base64 image)
 router.post('/upload', authMiddleware, async (req, res, next) => {
@@ -23,7 +33,6 @@ router.post('/upload', authMiddleware, async (req, res, next) => {
     console.log('Upload request received:', {
       hasDataUrl: !!dataUrl,
       dataUrlLength: dataUrl?.length,
-      dataUrlPrefix: dataUrl?.substring(0, 50),
       name,
       type
     });
@@ -44,22 +53,21 @@ router.post('/upload', authMiddleware, async (req, res, next) => {
     const buffer = Buffer.from(base64Data, 'base64');
 
     // Generate filename
-    const filename = `${randomUUID()}.${extension}`;
-    const filepath = join(UPLOADS_DIR, filename);
+    const filename = `${user.organizationId}/${randomUUID()}.${extension}`;
 
-    // Save file
-    writeFileSync(filepath, buffer);
+    // Upload to Vercel Blob
+    const blob = await put(filename, buffer, {
+      access: 'public',
+      contentType: `image/${extension}`
+    });
 
-    // Create URL (will be served by express static)
-    const url = `/uploads/${filename}`;
-
-    // Save to database
+    // Save to database with Vercel Blob URL
     const content = await prisma.content.create({
       data: {
         name: name || `Design ${Date.now()}`,
         type: type as any,
-        url,
-        thumbnailUrl: url,
+        url: blob.url,
+        thumbnailUrl: blob.url,
         isGenerated: false,
         organizationId: user.organizationId,
         userId: user.id,
@@ -71,6 +79,55 @@ router.post('/upload', authMiddleware, async (req, res, next) => {
     res.json({ success: true, content });
   } catch (error: any) {
     console.error('Upload error:', error);
+    res.status(500).json({ error: error.message || 'Upload failed' });
+  }
+});
+
+// Direct file upload (multipart form data)
+router.post('/upload/file', authMiddleware, upload.single('file'), async (req, res, next) => {
+  try {
+    const { user } = req as any;
+    const file = req.file;
+    const { name } = req.body;
+
+    if (!file) {
+      return res.status(400).json({ error: 'No file provided' });
+    }
+
+    // Determine content type
+    const isVideo = file.mimetype.startsWith('video/');
+    const type = isVideo ? 'VIDEO' : 'IMAGE';
+
+    // Get file extension from mimetype
+    const extension = file.mimetype.split('/')[1];
+
+    // Generate filename with org prefix for organization
+    const filename = `${user.organizationId}/${randomUUID()}.${extension}`;
+
+    // Upload to Vercel Blob
+    const blob = await put(filename, file.buffer, {
+      access: 'public',
+      contentType: file.mimetype
+    });
+
+    // Save to database
+    const content = await prisma.content.create({
+      data: {
+        name: name || file.originalname || `Upload ${Date.now()}`,
+        type: type as any,
+        url: blob.url,
+        thumbnailUrl: blob.url, // For videos, you'd generate a thumbnail
+        isGenerated: false,
+        organizationId: user.organizationId,
+        userId: user.id,
+        fileSize: file.size,
+        mimeType: file.mimetype
+      }
+    });
+
+    res.json({ success: true, content, blob: { url: blob.url } });
+  } catch (error: any) {
+    console.error('File upload error:', error);
     res.status(500).json({ error: error.message || 'Upload failed' });
   }
 });
@@ -122,6 +179,23 @@ router.get('/:id', authMiddleware, async (req, res, next) => {
 router.delete('/:id', authMiddleware, async (req, res, next) => {
   try {
     const { user } = req as any;
+
+    // Get content first to get the blob URL
+    const content = await prisma.content.findFirst({
+      where: {
+        id: req.params.id,
+        organizationId: user.organizationId
+      }
+    });
+
+    if (content?.url && content.url.includes('vercel-storage.com')) {
+      // Delete from Vercel Blob
+      try {
+        await del(content.url);
+      } catch (e) {
+        console.warn('Failed to delete blob:', e);
+      }
+    }
 
     await prisma.content.deleteMany({
       where: {

@@ -48,6 +48,7 @@ export const generate = {
     prompt: string;
     preset?: string;
     style?: string;
+    quality?: 'standard' | 'ultra';
     samples?: number;
     saveToLibrary?: boolean;
     enhance?: boolean;
@@ -65,6 +66,14 @@ export const content = {
   delete: (id: string) => api.delete(`/api/content/${id}`),
   upload: (dataUrl: string, name?: string) =>
     api.post('/api/content/upload', { dataUrl, name, type: 'IMAGE' }),
+  uploadFile: (file: File, name?: string) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    if (name) formData.append('name', name);
+    return api.post('/api/content/upload/file', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    });
+  },
   folders: () => api.get('/api/content/folders/list'),
   createFolder: (name: string, parentId?: string) =>
     api.post('/api/content/folders', { name, parentId }),
@@ -98,4 +107,36 @@ export const playlists = {
     api.delete(`/api/playlists/${id}/items/${itemId}`),
   reorder: (id: string, items: { id: string; order: number }[]) =>
     api.put(`/api/playlists/${id}/reorder`, { items }),
+};
+
+// AI Editing APIs
+export const edit = {
+  // Image editing
+  removeBackground: (image: string) =>
+    api.post('/api/edit/remove-background', { image }),
+  erase: (image: string, mask: string) =>
+    api.post('/api/edit/erase', { image, mask }),
+  inpaint: (image: string, mask: string, prompt: string) =>
+    api.post('/api/edit/inpaint', { image, mask, prompt }),
+  searchReplace: (image: string, searchPrompt: string, replacePrompt: string) =>
+    api.post('/api/edit/search-replace', { image, searchPrompt, replacePrompt }),
+  replaceBackground: (image: string, backgroundPrompt: string) =>
+    api.post('/api/edit/replace-background', { image, backgroundPrompt }),
+  outpaint: (image: string, direction: string, pixels?: number, prompt?: string) =>
+    api.post('/api/edit/outpaint', { image, direction, pixels, prompt }),
+  smartResize: (image: string, currentWidth: number, currentHeight: number, targetWidth: number, targetHeight: number, prompt?: string) =>
+    api.post('/api/edit/smart-resize', { image, currentWidth, currentHeight, targetWidth, targetHeight, prompt }),
+  upscale: (image: string, mode?: 'fast' | 'conservative', prompt?: string) =>
+    api.post('/api/edit/upscale', { image, mode, prompt }),
+
+  // AI copywriting
+  copywriter: (context: string, tone?: string, type?: string, brandName?: string) =>
+    api.post('/api/edit/copywriter', { context, tone, type, brandName }),
+  suggestPlacement: (image: string, canvasWidth: number, canvasHeight: number) =>
+    api.post('/api/edit/suggest-placement', { image, canvasWidth, canvasHeight }),
+  designAssist: (image: string, context: string, canvasWidth: number, canvasHeight: number, tone?: string, brandName?: string) =>
+    api.post('/api/edit/design-assist', { image, context, canvasWidth, canvasHeight, tone, brandName }),
+
+  // Get capabilities
+  capabilities: () => api.get('/api/edit/capabilities'),
 };
