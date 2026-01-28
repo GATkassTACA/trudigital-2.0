@@ -1,6 +1,8 @@
 import Anthropic from '@anthropic-ai/sdk';
 
-const anthropic = new Anthropic();
+const anthropic = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY || ''
+});
 
 export interface CopywriterInput {
   context: string;          // What the signage is for (e.g., "coffee shop sale", "gym membership")

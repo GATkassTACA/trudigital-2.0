@@ -90,13 +90,21 @@ Respond in this exact JSON format:
     return result;
 
   } catch (error: any) {
-    console.error('Prompt enhancement error:', error);
+    const hasApiKey = !!process.env.ANTHROPIC_API_KEY;
+    const keyPrefix = process.env.ANTHROPIC_API_KEY?.substring(0, 10) || 'NOT SET';
+    console.error('Prompt enhancement error:', {
+      message: error.message,
+      status: error.status,
+      hasApiKey,
+      keyPrefix,
+      error: error.toString()
+    });
 
     // Fallback to basic enhancement if Claude fails
     return {
       enhancedPrompt: `${userPrompt}, professional digital signage, high quality, 8k resolution, sharp focus, commercial photography`,
       negativePrompt: 'blurry, low quality, distorted, amateur, watermark, text, words, letters',
-      reasoning: 'Using basic enhancement due to API error',
+      reasoning: hasApiKey ? `API error: ${error.message}` : 'ANTHROPIC_API_KEY not configured',
       suggestedStyle: style || 'photographic',
       tags: ['signage', 'professional', 'digital display']
     };
