@@ -2,7 +2,20 @@
  * Image Compositor Service
  * Composites logo and text onto generated backgrounds
  */
-import sharp from 'sharp';
+
+// Dynamic import to avoid crashing on Vercel where sharp may not work
+let sharpModule: typeof import('sharp') | null = null;
+
+async function getSharp() {
+  if (sharpModule) return sharpModule;
+  try {
+    sharpModule = (await import('sharp')).default;
+    return sharpModule;
+  } catch (error) {
+    console.error('Sharp not available:', error);
+    return null;
+  }
+}
 
 interface CompositeOptions {
   background: string; // Base64 image
@@ -144,6 +157,14 @@ export async function compositeDesign(options: CompositeOptions): Promise<Compos
   } = options;
 
   try {
+    const sharp = await getSharp();
+    if (!sharp) {
+      return {
+        success: false,
+        error: 'Image processing not available in this environment'
+      };
+    }
+
     // Load background
     const bgBuffer = base64ToBuffer(background);
     const bgImage = sharp(bgBuffer);
@@ -160,7 +181,7 @@ export async function compositeDesign(options: CompositeOptions): Promise<Compos
     const logoBuffer = base64ToBuffer(logo);
     const logoTargetWidth = Math.round(width * logoScale);
 
-    const resizedLogo = await sharp(logoBuffer)
+    const resizedLogo = await sharp!(logoBuffer)
       .resize(logoTargetWidth, null, {
         fit: 'inside',
         withoutEnlargement: true
@@ -168,7 +189,7 @@ export async function compositeDesign(options: CompositeOptions): Promise<Compos
       .png()
       .toBuffer();
 
-    const logoMeta = await sharp(resizedLogo).metadata();
+    const logoMeta = await sharp!(resizedLogo).metadata();
     const logoWidth = logoMeta.width || logoTargetWidth;
     const logoHeight = logoMeta.height || logoTargetWidth;
 
@@ -204,7 +225,7 @@ export async function compositeDesign(options: CompositeOptions): Promise<Compos
     const textBuffer = Buffer.from(textSvg);
 
     // Composite everything
-    const result = await sharp(bgBuffer)
+    const result = await sharp!(bgBuffer)
       .composite([
         {
           input: resizedLogo,
