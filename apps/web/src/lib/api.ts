@@ -109,6 +109,37 @@ export const playlists = {
     api.put(`/api/playlists/${id}/reorder`, { items }),
 };
 
+// Brand Kit API
+export const brandkit = {
+  get: () => api.get('/api/brandkit'),
+  update: (data: {
+    brandColors?: string[];
+    logoUrl?: string | null;
+    logoLightUrl?: string | null;
+    brandFonts?: string[];
+    brandName?: string | null;
+    tagline?: string | null;
+  }) => api.patch('/api/brandkit', data),
+  uploadLogo: (dataUrl: string, type: 'primary' | 'light' = 'primary') =>
+    api.post('/api/brandkit/logo', { dataUrl, type }),
+  deleteLogo: (type: 'primary' | 'light') =>
+    api.delete(`/api/brandkit/logo/${type}`),
+  extractColors: (dataUrl: string) =>
+    api.post('/api/brandkit/extract-colors', { dataUrl }),
+};
+
+// AI Auto-Design API
+export const autodesign = {
+  create: (data: {
+    logo: string; // Base64 data URL
+    text: string;
+    businessType?: string;
+    preset?: string;
+    style?: string;
+  }) => api.post('/api/autodesign', data),
+  get: (generationId: string) => api.get(`/api/autodesign/${generationId}`),
+};
+
 // AI Editing APIs
 export const edit = {
   // Image editing
@@ -139,4 +170,30 @@ export const edit = {
 
   // Get capabilities
   capabilities: () => api.get('/api/edit/capabilities'),
+};
+
+// Scheduling API
+export const schedules = {
+  list: () => api.get('/api/schedules'),
+  get: (id: string) => api.get(`/api/schedules/${id}`),
+  create: (data: {
+    name: string;
+    description?: string;
+    type?: 'ALWAYS' | 'TIME_RANGE' | 'DATE_RANGE' | 'DAY_OF_WEEK' | 'DATETIME_RANGE';
+    startTime?: string;
+    endTime?: string;
+    startDate?: string;
+    endDate?: string;
+    daysOfWeek?: number[];
+    priority?: number;
+    isActive?: boolean;
+  }) => api.post('/api/schedules', data),
+  update: (id: string, data: any) => api.patch(`/api/schedules/${id}`, data),
+  delete: (id: string) => api.delete(`/api/schedules/${id}`),
+  assign: (scheduleId: string, playlistItemId: string) =>
+    api.post(`/api/schedules/${scheduleId}/assign`, { playlistItemId }),
+  unassign: (scheduleId: string, playlistItemId: string) =>
+    api.post(`/api/schedules/${scheduleId}/unassign`, { playlistItemId }),
+  getActive: (displayId: string) => api.get(`/api/schedules/active/${displayId}`),
+  presets: () => api.get('/api/schedules/presets/list'),
 };

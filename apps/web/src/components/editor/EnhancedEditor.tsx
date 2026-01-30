@@ -40,10 +40,23 @@ import {
   ChevronRight,
   Paintbrush,
   Target,
-  RefreshCw
+  RefreshCw,
+  Layers,
+  Lock,
+  Unlock,
+  Group,
+  Ungroup,
+  Eye,
+  EyeOff,
+  Clipboard,
+  ClipboardPaste,
+  Grid3X3,
+  SunDim,
+  FolderOpen,
+  Image
 } from 'lucide-react';
-import { TEMPLATES, TEMPLATE_CATEGORIES, Template } from './templates';
-import { edit } from '@/lib/api';
+import { TEMPLATES, TEMPLATE_CATEGORIES, Template, ANIMATIONS } from './templates';
+import { edit, content } from '@/lib/api';
 import toast from 'react-hot-toast';
 
 interface EnhancedEditorProps {
@@ -52,6 +65,10 @@ interface EnhancedEditorProps {
   height?: number;
   onSave?: (dataUrl: string) => void;
   onCanvaEdit?: () => void;
+  initialLayers?: {
+    logo?: string;
+    text?: string;
+  };
 }
 
 const FONTS = [
@@ -123,7 +140,8 @@ export default function EnhancedEditor({
   width = 1344,
   height = 768,
   onSave,
-  onCanvaEdit
+  onCanvaEdit,
+  initialLayers
 }: EnhancedEditorProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const maskCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -136,6 +154,7 @@ export default function EnhancedEditor({
   const initializedRef = useRef(false);
   const currentDimensionsRef = useRef({ width: 0, height: 0 });
   const lastBackgroundRef = useRef<string | undefined>(undefined);
+  const initialLayersAddedRef = useRef(false);
 
   // Basic state
   const [isLoaded, setIsLoaded] = useState(false);
@@ -177,6 +196,39 @@ export default function EnhancedEditor({
   // Mask drawing state
   const [isDrawing, setIsDrawing] = useState(false);
   const [maskCtx, setMaskCtx] = useState<CanvasRenderingContext2D | null>(null);
+
+  // Drag and drop state
+  const [isDraggingOver, setIsDraggingOver] = useState(false);
+
+  // Layers panel state
+  const [showLayers, setShowLayers] = useState(false);
+  const [canvasObjects, setCanvasObjects] = useState<any[]>([]);
+
+  // Effects state
+  const [showEffects, setShowEffects] = useState(false);
+  const [objectOpacity, setObjectOpacity] = useState(100);
+  const [shadowEnabled, setShadowEnabled] = useState(false);
+  const [shadowBlur, setShadowBlur] = useState(10);
+  const [shadowOffsetX, setShadowOffsetX] = useState(5);
+  const [shadowOffsetY, setShadowOffsetY] = useState(5);
+  const [shadowColor, setShadowColor] = useState('rgba(0,0,0,0.5)');
+
+  // Animation state
+  const [objectAnimation, setObjectAnimation] = useState<string>('none');
+  const [animationDuration, setAnimationDuration] = useState(1000);
+  const [showAnimationPreview, setShowAnimationPreview] = useState(false);
+
+  // Snap to grid state
+  const [snapToGrid, setSnapToGrid] = useState(true);
+  const [gridSize, setGridSize] = useState(20);
+
+  // Clipboard state
+  const clipboardRef = useRef<any>(null);
+
+  // Content Library browser state
+  const [showLibrary, setShowLibrary] = useState(false);
+  const [libraryContent, setLibraryContent] = useState<any[]>([]);
+  const [libraryLoading, setLibraryLoading] = useState(false);
 
   // Load fabric.js
   useEffect(() => {
@@ -247,8 +299,29 @@ export default function EnhancedEditor({
       height,
       backgroundColor: '#1a1a1a',
       selection: true,
-      preserveObjectStacking: true
+      preserveObjectStacking: true,
+      // Enable better control styling globally
+      controlsAboveOverlay: true
     });
+
+    // Configure default object controls styling (Fabric v7)
+    if (fabric.Object) {
+      fabric.Object.prototype.set({
+        cornerSize: 20,
+        cornerColor: '#00d4ff',
+        cornerStrokeColor: '#ffffff',
+        borderColor: '#00d4ff',
+        borderScaleFactor: 2,
+        transparentCorners: false,
+        cornerStyle: 'circle',
+        hasControls: true,
+        hasBorders: true,
+        padding: 10
+      });
+    }
+
+    // Ensure controls are visible above scaled canvas
+    canvas.controlsAboveOverlay = true;
 
     fabricCanvasRef.current = canvas;
     initializedRef.current = true;
@@ -268,6 +341,16 @@ export default function EnhancedEditor({
     canvas.on('object:modified', saveState);
     canvas.on('object:added', saveState);
 
+    // Snap to grid on object moving
+    canvas.on('object:moving', (e: any) => {
+      const obj = e.target;
+      // Snap to 20px grid
+      obj.set({
+        left: Math.round(obj.left / 20) * 20,
+        top: Math.round(obj.top / 20) * 20
+      });
+    });
+
     const updateScale = () => {
       if (containerRef.current) {
         const containerWidth = containerRef.current.offsetWidth - 48;
@@ -284,7 +367,7 @@ export default function EnhancedEditor({
     };
   }, [isLoaded, width, height, saveState]);
 
-  // Load background image
+  // Load generated image as a resizable object (not locked background)
   useEffect(() => {
     if (!isLoaded || !fabricCanvasRef.current || !fabricRef.current || !backgroundImage) return;
     if (lastBackgroundRef.current === backgroundImage) return;
@@ -295,16 +378,52 @@ export default function EnhancedEditor({
 
     setImageLoading(true);
 
+    // Remove any existing generated image
+    const existingGenerated = canvas.getObjects().find((obj: any) => obj._isGeneratedImage);
+    if (existingGenerated) {
+      canvas.remove(existingGenerated);
+    }
+
     const imgEl = document.createElement('img');
     imgEl.onload = () => {
       try {
+        // Scale to fit canvas while maintaining aspect ratio
         const scaleX = width / imgEl.width;
         const scaleY = height / imgEl.height;
+        const scale = Math.min(scaleX, scaleY);
+
         const FabricImage = fabric.FabricImage || fabric.Image;
-        const bgImage = new FabricImage(imgEl);
-        bgImage.set({ scaleX, scaleY, originX: 'left', originY: 'top' });
-        canvas.backgroundImage = bgImage;
-        canvas.renderAll();
+        const bgImage = new FabricImage(imgEl, {
+          left: (width - imgEl.width * scale) / 2,
+          top: (height - imgEl.height * scale) / 2,
+          scaleX: scale,
+          scaleY: scale,
+          originX: 'left',
+          originY: 'top'
+        });
+
+        // Mark as generated image and make it resizable
+        bgImage.set({
+          _isGeneratedImage: true,
+          hasControls: true,
+          hasBorders: true,
+          lockUniScaling: true,
+          selectable: true,
+          evented: true,
+          cornerSize: 20,
+          cornerColor: '#ff6b6b',
+          cornerStrokeColor: '#ffffff',
+          borderColor: '#ff6b6b',
+          borderScaleFactor: 2,
+          transparentCorners: false,
+          cornerStyle: 'circle',
+          padding: 10
+        });
+
+        canvas.add(bgImage);
+        canvas.sendObjectToBack(bgImage);
+        bgImage.setCoords();
+        canvas.requestRenderAll();
         setImageLoading(false);
       } catch (err) {
         console.error('Error setting background:', err);
@@ -342,27 +461,168 @@ export default function EnhancedEditor({
     return maskCanvasRef.current.toDataURL('image/png');
   }, []);
 
-  // Apply AI result to canvas
+  // Apply AI result to canvas (as resizable object)
   const applyAIResult = useCallback((imageUrl: string) => {
     if (!fabricCanvasRef.current || !fabricRef.current) return;
 
     const fabric = fabricRef.current;
     const canvas = fabricCanvasRef.current;
 
+    // Remove existing generated image
+    const existingGenerated = canvas.getObjects().find((obj: any) => obj._isGeneratedImage);
+    if (existingGenerated) {
+      canvas.remove(existingGenerated);
+    }
+
     const imgEl = document.createElement('img');
     imgEl.onload = () => {
       const scaleX = width / imgEl.width;
       const scaleY = height / imgEl.height;
+      const scale = Math.min(scaleX, scaleY);
+
       const FabricImage = fabric.FabricImage || fabric.Image;
-      const bgImage = new FabricImage(imgEl);
-      bgImage.set({ scaleX, scaleY, originX: 'left', originY: 'top' });
-      canvas.backgroundImage = bgImage;
-      canvas.renderAll();
+      const bgImage = new FabricImage(imgEl, {
+        left: (width - imgEl.width * scale) / 2,
+        top: (height - imgEl.height * scale) / 2,
+        scaleX: scale,
+        scaleY: scale,
+        originX: 'left',
+        originY: 'top'
+      });
+
+      bgImage.set({
+        _isGeneratedImage: true,
+        hasControls: true,
+        hasBorders: true,
+        lockUniScaling: true,
+        selectable: true,
+        evented: true,
+        cornerSize: 20,
+        cornerColor: '#ff6b6b',
+        cornerStrokeColor: '#ffffff',
+        borderColor: '#ff6b6b',
+        borderScaleFactor: 2,
+        transparentCorners: false,
+        cornerStyle: 'circle',
+        padding: 10
+      });
+
+      canvas.add(bgImage);
+      canvas.sendObjectToBack(bgImage);
+      bgImage.setCoords();
+      canvas.requestRenderAll();
       saveState();
       lastBackgroundRef.current = imageUrl;
     };
     imgEl.src = imageUrl;
   }, [width, height, saveState]);
+
+  // Add initial layers (logo + text) from Auto-Design
+  useEffect(() => {
+    if (!isLoaded || !fabricCanvasRef.current || !fabricRef.current || !initialLayers || initialLayersAddedRef.current) {
+      return;
+    }
+
+    // Wait a bit for background to fully render
+    const timer = setTimeout(() => {
+      const canvas = fabricCanvasRef.current;
+      const fabric = fabricRef.current;
+      if (!canvas || !fabric) return;
+
+      initialLayersAddedRef.current = true;
+
+      // Add logo if provided
+      if (initialLayers.logo) {
+        const FabricImage = fabric.FabricImage || fabric.Image;
+        const logoEl = document.createElement('img');
+        logoEl.crossOrigin = 'anonymous';
+        logoEl.onload = () => {
+          // Scale logo to ~15% of canvas width
+          const targetWidth = width * 0.15;
+          const scale = targetWidth / logoEl.width;
+
+          const logoImg = new FabricImage(logoEl, {
+            left: 40,
+            top: 40,
+            scaleX: scale,
+            scaleY: scale,
+            originX: 'left',
+            originY: 'top'
+          });
+
+          logoImg.set({
+            _isLogoImage: true,
+            hasControls: true,
+            hasBorders: true,
+            lockUniScaling: true,
+            selectable: true,
+            evented: true,
+            cornerSize: 15,
+            cornerColor: '#10b981',
+            cornerStrokeColor: '#ffffff',
+            borderColor: '#10b981',
+            transparentCorners: false,
+            cornerStyle: 'circle',
+            padding: 8
+          });
+
+          canvas.add(logoImg);
+          logoImg.setCoords();
+          canvas.requestRenderAll();
+          saveState();
+        };
+        logoEl.src = initialLayers.logo;
+      }
+
+      // Add text if provided
+      if (initialLayers.text) {
+        const FabricText = fabric.IText || fabric.Text;
+        const textObj = new FabricText(initialLayers.text, {
+          left: width / 2,
+          top: height / 2,
+          originX: 'center',
+          originY: 'center',
+          fontFamily: 'Arial',
+          fontSize: Math.min(width / 10, 72),
+          fontWeight: 'bold',
+          fill: '#FFFFFF',
+          textAlign: 'center',
+          shadow: new fabric.Shadow({
+            color: 'rgba(0,0,0,0.8)',
+            blur: 10,
+            offsetX: 2,
+            offsetY: 4
+          })
+        });
+
+        textObj.set({
+          hasControls: true,
+          hasBorders: true,
+          selectable: true,
+          evented: true,
+          cornerSize: 12,
+          cornerColor: '#f59e0b',
+          cornerStrokeColor: '#ffffff',
+          borderColor: '#f59e0b',
+          transparentCorners: false,
+          cornerStyle: 'circle',
+          padding: 8
+        });
+
+        canvas.add(textObj);
+        canvas.bringObjectToFront(textObj);
+        textObj.setCoords();
+        canvas.requestRenderAll();
+        saveState();
+      }
+
+      if (initialLayers.logo || initialLayers.text) {
+        toast.success('Logo and text added as separate layers - drag to reposition!');
+      }
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [isLoaded, initialLayers, width, height, saveState]);
 
   // AI Tool handlers
   const handleRemoveBackground = async () => {
@@ -622,7 +882,16 @@ export default function EnhancedEditor({
         blur: 4,
         offsetX: 2,
         offsetY: 2
-      })
+      }),
+      // Controls
+      hasControls: true,
+      hasBorders: true,
+      cornerSize: 12,
+      cornerColor: '#00d4ff',
+      cornerStrokeColor: '#00d4ff',
+      borderColor: '#00d4ff',
+      transparentCorners: false,
+      cornerStyle: 'circle'
     });
 
     fabricCanvasRef.current.add(textObj);
@@ -660,7 +929,16 @@ export default function EnhancedEditor({
       top: height / 2 - 25,
       ...textOptions,
       width: 300,
-      editable: true
+      editable: true,
+      // Controls
+      hasControls: true,
+      hasBorders: true,
+      cornerSize: 12,
+      cornerColor: '#00d4ff',
+      cornerStrokeColor: '#00d4ff',
+      borderColor: '#00d4ff',
+      transparentCorners: false,
+      cornerStyle: 'circle'
     });
     fabricCanvasRef.current.add(text);
     fabricCanvasRef.current.setActiveObject(text);
@@ -678,7 +956,16 @@ export default function EnhancedEditor({
       top: height / 2 - 50,
       fill: 'rgba(255, 255, 255, 0.8)',
       stroke: '#000000',
-      strokeWidth: 2
+      strokeWidth: 2,
+      // Controls
+      hasControls: true,
+      hasBorders: true,
+      cornerSize: 12,
+      cornerColor: '#00d4ff',
+      cornerStrokeColor: '#00d4ff',
+      borderColor: '#00d4ff',
+      transparentCorners: false,
+      cornerStyle: 'circle'
     };
 
     switch (shapeType) {
@@ -719,31 +1006,158 @@ export default function EnhancedEditor({
     }
   }, [width, height]);
 
+  // Add image to canvas as a resizable/movable object
+  const addImageToCanvas = useCallback((dataUrl: string, dropX?: number, dropY?: number) => {
+    if (!fabricCanvasRef.current || !fabricRef.current) return;
+
+    const fabric = fabricRef.current;
+    const FabricImage = fabric.FabricImage || fabric.Image;
+    const imgEl = document.createElement('img');
+    imgEl.onload = () => {
+      // Scale image to fit reasonably (max 50% of canvas)
+      const maxW = width * 0.5;
+      const maxH = height * 0.5;
+      let scaleX = 1;
+      let scaleY = 1;
+      if (imgEl.width > maxW || imgEl.height > maxH) {
+        const ratio = Math.min(maxW / imgEl.width, maxH / imgEl.height);
+        scaleX = ratio;
+        scaleY = ratio;
+      }
+
+      const img = new FabricImage(imgEl, {
+        left: dropX ?? (width / 2 - (imgEl.width * scaleX) / 2),
+        top: dropY ?? (height / 2 - (imgEl.height * scaleY) / 2),
+        scaleX,
+        scaleY
+      });
+
+      // Enable all controls for resize/rotate (Fabric v7)
+      // lockUniScaling: true = maintain aspect ratio by default
+      img.set({
+        hasControls: true,
+        hasBorders: true,
+        lockUniScaling: true,
+        lockScalingX: false,
+        lockScalingY: false,
+        lockRotation: false,
+        selectable: true,
+        evented: true,
+        cornerSize: 20,
+        cornerColor: '#00d4ff',
+        cornerStrokeColor: '#ffffff',
+        borderColor: '#00d4ff',
+        borderScaleFactor: 2,
+        transparentCorners: false,
+        cornerStyle: 'circle',
+        padding: 10
+      });
+
+      fabricCanvasRef.current.add(img);
+      fabricCanvasRef.current.setActiveObject(img);
+      img.setCoords();
+      fabricCanvasRef.current.requestRenderAll();
+      toast.success('Image added - drag corners to resize');
+    };
+    imgEl.src = dataUrl;
+  }, [width, height]);
+
   const handleImageUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !fabricCanvasRef.current || !fabricRef.current) return;
 
     const reader = new FileReader();
     reader.onload = (event) => {
-      const fabric = fabricRef.current;
-      const FabricImage = fabric.FabricImage || fabric.Image;
-      const imgEl = document.createElement('img');
-      imgEl.onload = () => {
-        const img = new FabricImage(imgEl, {
-          left: width / 2 - imgEl.width / 4,
-          top: height / 2 - imgEl.height / 4,
-          scaleX: 0.5,
-          scaleY: 0.5
-        });
-        fabricCanvasRef.current.add(img);
-        fabricCanvasRef.current.setActiveObject(img);
-        fabricCanvasRef.current.renderAll();
-      };
-      imgEl.src = event.target?.result as string;
+      addImageToCanvas(event.target?.result as string);
     };
     reader.readAsDataURL(file);
     e.target.value = '';
-  }, [width, height]);
+  }, [addImageToCanvas]);
+
+  // Fetch content library
+  const fetchLibrary = useCallback(async () => {
+    setLibraryLoading(true);
+    try {
+      const response = await content.list();
+      // Filter to only images
+      const images = (response.data.content || []).filter(
+        (item: any) => item.type === 'IMAGE'
+      );
+      setLibraryContent(images);
+    } catch (error) {
+      console.error('Failed to fetch library:', error);
+      toast.error('Failed to load content library');
+    } finally {
+      setLibraryLoading(false);
+    }
+  }, []);
+
+  // Open library browser
+  const openLibrary = useCallback(() => {
+    setShowLibrary(true);
+    fetchLibrary();
+  }, [fetchLibrary]);
+
+  // Add image from library to canvas
+  const addFromLibrary = useCallback((item: any) => {
+    if (!item.url) return;
+
+    // Handle relative URLs (local dev) vs absolute URLs (production)
+    const imageUrl = item.url.startsWith('/')
+      ? `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}${item.url}`
+      : item.url;
+
+    addImageToCanvas(imageUrl);
+    setShowLibrary(false);
+    toast.success(`Added "${item.name}" to canvas`);
+  }, [addImageToCanvas]);
+
+  // Drag and drop handlers for canvas
+  const handleCanvasDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingOver(true);
+  }, []);
+
+  const handleCanvasDragLeave = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingOver(false);
+  }, []);
+
+  const handleCanvasDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingOver(false);
+
+    const files = Array.from(e.dataTransfer.files);
+    const imageFile = files.find(f => f.type.startsWith('image/'));
+
+    if (!imageFile) {
+      toast.error('Please drop an image file');
+      return;
+    }
+
+    // Calculate drop position relative to canvas
+    const rect = containerRef.current?.getBoundingClientRect();
+    let dropX = width / 2;
+    let dropY = height / 2;
+
+    if (rect) {
+      const containerCenterX = rect.left + rect.width / 2;
+      const containerCenterY = rect.top + rect.height / 2;
+      const canvasOffsetX = (e.clientX - containerCenterX) / scale;
+      const canvasOffsetY = (e.clientY - containerCenterY) / scale;
+      dropX = width / 2 + canvasOffsetX;
+      dropY = height / 2 + canvasOffsetY;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      addImageToCanvas(event.target?.result as string, dropX, dropY);
+    };
+    reader.readAsDataURL(imageFile);
+  }, [addImageToCanvas, width, height, scale]);
 
   const applyTemplate = useCallback((template: Template) => {
     if (!fabricCanvasRef.current || !fabricRef.current) return;
@@ -755,17 +1169,28 @@ export default function EnhancedEditor({
       if (!obj._isBackground) canvas.remove(obj);
     });
 
+    const controlProps = {
+      hasControls: true,
+      hasBorders: true,
+      cornerSize: 12,
+      cornerColor: '#00d4ff',
+      cornerStrokeColor: '#00d4ff',
+      borderColor: '#00d4ff',
+      transparentCorners: false,
+      cornerStyle: 'circle'
+    };
+
     template.elements.forEach((element) => {
       let obj;
       switch (element.type) {
         case 'text':
-          obj = new fabric.Textbox(element.props.text || 'Text', { ...element.props, editable: true });
+          obj = new fabric.Textbox(element.props.text || 'Text', { ...element.props, ...controlProps, editable: true });
           break;
         case 'rect':
-          obj = new fabric.Rect(element.props);
+          obj = new fabric.Rect({ ...element.props, ...controlProps });
           break;
         case 'circle':
-          obj = new fabric.Circle(element.props);
+          obj = new fabric.Circle({ ...element.props, ...controlProps });
           break;
       }
       if (obj) canvas.add(obj);
@@ -783,22 +1208,6 @@ export default function EnhancedEditor({
     setSelectedObject(null);
     saveState();
   }, [selectedObject, saveState]);
-
-  // Keyboard shortcuts for delete
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't delete if user is typing in an input/textarea
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedObject && !selectedObject._isBackground) {
-        e.preventDefault();
-        deleteSelected();
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedObject, deleteSelected]);
 
   const duplicateSelected = useCallback(() => {
     if (!fabricCanvasRef.current || !selectedObject) return;
@@ -821,6 +1230,249 @@ export default function EnhancedEditor({
     fabricCanvasRef.current.sendObjectBackwards(selectedObject);
     fabricCanvasRef.current.renderAll();
   }, [selectedObject]);
+
+  // Copy to clipboard
+  const copySelected = useCallback(() => {
+    if (!fabricCanvasRef.current || !selectedObject) return;
+    selectedObject.clone((cloned: any) => {
+      clipboardRef.current = cloned;
+      toast.success('Copied to clipboard');
+    });
+  }, [selectedObject]);
+
+  // Paste from clipboard
+  const pasteFromClipboard = useCallback(() => {
+    if (!fabricCanvasRef.current || !clipboardRef.current) return;
+    clipboardRef.current.clone((cloned: any) => {
+      cloned.set({
+        left: (cloned.left || 0) + 20,
+        top: (cloned.top || 0) + 20,
+        evented: true
+      });
+      fabricCanvasRef.current.add(cloned);
+      fabricCanvasRef.current.setActiveObject(cloned);
+      fabricCanvasRef.current.requestRenderAll();
+      saveState();
+      toast.success('Pasted');
+    });
+  }, [saveState]);
+
+  // Update layers list
+  const updateLayersList = useCallback(() => {
+    if (!fabricCanvasRef.current) return;
+    const objects = fabricCanvasRef.current.getObjects().map((obj: any, index: number) => ({
+      id: index,
+      type: obj.type || 'object',
+      name: obj._isGeneratedImage ? 'Generated Image' :
+            obj.type === 'textbox' || obj.type === 'Textbox' ? `Text: "${(obj.text || '').slice(0, 15)}..."` :
+            obj.type === 'image' || obj.type === 'Image' ? 'Imported Image' :
+            obj.type?.charAt(0).toUpperCase() + obj.type?.slice(1) || 'Object',
+      visible: obj.visible !== false,
+      locked: obj.lockMovementX && obj.lockMovementY,
+      object: obj
+    }));
+    setCanvasObjects(objects.reverse()); // Reverse so top layer shows first
+  }, []);
+
+  // Update layers when panel opens or selection changes
+  useEffect(() => {
+    if (showLayers) {
+      updateLayersList();
+    }
+  }, [showLayers, selectedObject, updateLayersList]);
+
+  // Lock/unlock selected object
+  const toggleLock = useCallback(() => {
+    if (!fabricCanvasRef.current || !selectedObject) return;
+    const isLocked = selectedObject.lockMovementX && selectedObject.lockMovementY;
+    selectedObject.set({
+      lockMovementX: !isLocked,
+      lockMovementY: !isLocked,
+      lockScalingX: !isLocked,
+      lockScalingY: !isLocked,
+      lockRotation: !isLocked,
+      hasControls: isLocked,
+      selectable: true
+    });
+    fabricCanvasRef.current.requestRenderAll();
+    updateLayersList();
+    toast.success(isLocked ? 'Object unlocked' : 'Object locked');
+  }, [selectedObject, updateLayersList]);
+
+  // Toggle object visibility
+  const toggleVisibility = useCallback((obj: any) => {
+    if (!fabricCanvasRef.current) return;
+    obj.set('visible', !obj.visible);
+    fabricCanvasRef.current.requestRenderAll();
+    updateLayersList();
+  }, [updateLayersList]);
+
+  // Select object from layers panel
+  const selectFromLayers = useCallback((obj: any) => {
+    if (!fabricCanvasRef.current) return;
+    fabricCanvasRef.current.setActiveObject(obj);
+    fabricCanvasRef.current.requestRenderAll();
+  }, []);
+
+  // Group selected objects
+  const groupSelected = useCallback(() => {
+    if (!fabricCanvasRef.current || !fabricRef.current) return;
+    const activeSelection = fabricCanvasRef.current.getActiveObject();
+    if (!activeSelection || activeSelection.type !== 'activeSelection') {
+      toast.error('Select multiple objects to group (Shift+click)');
+      return;
+    }
+    const fabric = fabricRef.current;
+    const group = new fabric.Group(activeSelection.getObjects(), {
+      cornerSize: 20,
+      cornerColor: '#00d4ff',
+      cornerStrokeColor: '#ffffff',
+      borderColor: '#00d4ff',
+      transparentCorners: false,
+      cornerStyle: 'circle'
+    });
+    fabricCanvasRef.current.discardActiveObject();
+    activeSelection.getObjects().forEach((obj: any) => fabricCanvasRef.current.remove(obj));
+    fabricCanvasRef.current.add(group);
+    fabricCanvasRef.current.setActiveObject(group);
+    fabricCanvasRef.current.requestRenderAll();
+    saveState();
+    toast.success('Objects grouped');
+  }, [saveState]);
+
+  // Ungroup selected group
+  const ungroupSelected = useCallback(() => {
+    if (!fabricCanvasRef.current || !selectedObject || selectedObject.type !== 'group') {
+      toast.error('Select a group to ungroup');
+      return;
+    }
+    const items = selectedObject.getObjects();
+    selectedObject._restoreObjectsState();
+    fabricCanvasRef.current.remove(selectedObject);
+    items.forEach((obj: any) => {
+      fabricCanvasRef.current.add(obj);
+    });
+    fabricCanvasRef.current.discardActiveObject();
+    fabricCanvasRef.current.requestRenderAll();
+    saveState();
+    toast.success('Group ungrouped');
+  }, [selectedObject, saveState]);
+
+  // Update opacity
+  const updateOpacity = useCallback((value: number) => {
+    if (!fabricCanvasRef.current || !selectedObject) return;
+    setObjectOpacity(value);
+    selectedObject.set('opacity', value / 100);
+    fabricCanvasRef.current.requestRenderAll();
+  }, [selectedObject]);
+
+  // Update shadow
+  const updateShadow = useCallback(() => {
+    if (!fabricCanvasRef.current || !selectedObject || !fabricRef.current) return;
+    const fabric = fabricRef.current;
+    if (shadowEnabled) {
+      selectedObject.set('shadow', new fabric.Shadow({
+        color: shadowColor,
+        blur: shadowBlur,
+        offsetX: shadowOffsetX,
+        offsetY: shadowOffsetY
+      }));
+    } else {
+      selectedObject.set('shadow', null);
+    }
+    fabricCanvasRef.current.requestRenderAll();
+  }, [selectedObject, shadowEnabled, shadowBlur, shadowOffsetX, shadowOffsetY, shadowColor]);
+
+  // Apply shadow when settings change
+  useEffect(() => {
+    updateShadow();
+  }, [shadowEnabled, shadowBlur, shadowOffsetX, shadowOffsetY, shadowColor, updateShadow]);
+
+  // Update effect state when selection changes
+  useEffect(() => {
+    if (selectedObject) {
+      setObjectOpacity(Math.round((selectedObject.opacity ?? 1) * 100));
+      const shadow = selectedObject.shadow;
+      if (shadow) {
+        setShadowEnabled(true);
+        setShadowBlur(shadow.blur || 10);
+        setShadowOffsetX(shadow.offsetX || 5);
+        setShadowOffsetY(shadow.offsetY || 5);
+        setShadowColor(shadow.color || 'rgba(0,0,0,0.5)');
+      } else {
+        setShadowEnabled(false);
+      }
+    }
+  }, [selectedObject]);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't trigger if user is typing in an input/textarea
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+
+      const isMod = e.ctrlKey || e.metaKey;
+
+      // Delete
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedObject && !selectedObject._isBackground) {
+        e.preventDefault();
+        deleteSelected();
+      }
+      // Copy (Ctrl/Cmd + C)
+      else if (isMod && e.key === 'c' && selectedObject) {
+        e.preventDefault();
+        copySelected();
+      }
+      // Paste (Ctrl/Cmd + V)
+      else if (isMod && e.key === 'v') {
+        e.preventDefault();
+        pasteFromClipboard();
+      }
+      // Duplicate (Ctrl/Cmd + D)
+      else if (isMod && e.key === 'd' && selectedObject) {
+        e.preventDefault();
+        duplicateSelected();
+      }
+      // Undo (Ctrl/Cmd + Z)
+      else if (isMod && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+      }
+      // Redo (Ctrl/Cmd + Shift + Z or Ctrl/Cmd + Y)
+      else if ((isMod && e.shiftKey && e.key === 'z') || (isMod && e.key === 'y')) {
+        e.preventDefault();
+        redo();
+      }
+      // Group (Ctrl/Cmd + G)
+      else if (isMod && e.key === 'g' && !e.shiftKey) {
+        e.preventDefault();
+        groupSelected();
+      }
+      // Ungroup (Ctrl/Cmd + Shift + G)
+      else if (isMod && e.shiftKey && e.key === 'G') {
+        e.preventDefault();
+        ungroupSelected();
+      }
+      // Lock/Unlock (Ctrl/Cmd + L)
+      else if (isMod && e.key === 'l' && selectedObject) {
+        e.preventDefault();
+        toggleLock();
+      }
+      // Bring Forward (])
+      else if (e.key === ']' && selectedObject) {
+        e.preventDefault();
+        bringForward();
+      }
+      // Send Backward ([)
+      else if (e.key === '[' && selectedObject) {
+        e.preventDefault();
+        sendBackward();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedObject, deleteSelected, copySelected, pasteFromClipboard, duplicateSelected, undo, redo, groupSelected, ungroupSelected, toggleLock, bringForward, sendBackward]);
 
   const updateTextStyle = useCallback((property: string, value: any) => {
     if (!fabricCanvasRef.current || !selectedObject) return;
@@ -1009,11 +1661,16 @@ export default function EnhancedEditor({
             <button onClick={() => addShape('line')} className="p-2 hover:bg-gray-700 rounded-lg text-gray-300" title="Line"><Minus className="w-5 h-5" /></button>
           </div>
 
-          {/* Image Upload */}
+          {/* Image Import/Overlay */}
           <div className="flex items-center gap-1 border-r border-gray-600 pr-3">
             <input ref={fileInputRef} type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
-            <button onClick={() => fileInputRef.current?.click()} className="p-2 hover:bg-gray-700 rounded-lg text-gray-300" title="Upload Image">
+            <button onClick={() => fileInputRef.current?.click()} className="flex items-center gap-2 px-3 py-2 hover:bg-gray-700 rounded-lg text-gray-300" title="Upload new image">
               <Upload className="w-5 h-5" />
+              <span className="text-sm">Upload</span>
+            </button>
+            <button onClick={openLibrary} className={`flex items-center gap-2 px-3 py-2 rounded-lg ${showLibrary ? 'bg-brand-500 text-white' : 'hover:bg-gray-700 text-gray-300'}`} title="Browse content library">
+              <FolderOpen className="w-5 h-5" />
+              <span className="text-sm">Library</span>
             </button>
           </div>
 
@@ -1066,15 +1723,49 @@ export default function EnhancedEditor({
             </div>
           )}
 
+          {/* Clipboard */}
+          <div className="flex items-center gap-1 border-r border-gray-600 pr-3">
+            <button onClick={copySelected} disabled={!selectedObject} className="p-2 hover:bg-gray-700 rounded-lg text-gray-300 disabled:opacity-30" title="Copy (Ctrl+C)"><Clipboard className="w-4 h-4" /></button>
+            <button onClick={pasteFromClipboard} className="p-2 hover:bg-gray-700 rounded-lg text-gray-300" title="Paste (Ctrl+V)"><ClipboardPaste className="w-4 h-4" /></button>
+          </div>
+
           {/* Object Actions */}
           {selectedObject && !selectedObject._isBackground && (
             <div className="flex items-center gap-1 border-r border-gray-600 pr-3">
-              <button onClick={duplicateSelected} className="p-2 hover:bg-gray-700 rounded-lg text-gray-300" title="Duplicate"><Copy className="w-4 h-4" /></button>
-              <button onClick={bringForward} className="p-2 hover:bg-gray-700 rounded-lg text-gray-300" title="Bring Forward"><ChevronUp className="w-4 h-4" /></button>
-              <button onClick={sendBackward} className="p-2 hover:bg-gray-700 rounded-lg text-gray-300" title="Send Backward"><ChevronDown className="w-4 h-4" /></button>
+              <button onClick={duplicateSelected} className="p-2 hover:bg-gray-700 rounded-lg text-gray-300" title="Duplicate (Ctrl+D)"><Copy className="w-4 h-4" /></button>
+              <button onClick={bringForward} className="p-2 hover:bg-gray-700 rounded-lg text-gray-300" title="Bring Forward (])"><ChevronUp className="w-4 h-4" /></button>
+              <button onClick={sendBackward} className="p-2 hover:bg-gray-700 rounded-lg text-gray-300" title="Send Backward ([)"><ChevronDown className="w-4 h-4" /></button>
+              <button onClick={toggleLock} className="p-2 hover:bg-gray-700 rounded-lg text-gray-300" title="Lock/Unlock (Ctrl+L)">
+                {selectedObject?.lockMovementX ? <Lock className="w-4 h-4" /> : <Unlock className="w-4 h-4" />}
+              </button>
               <button onClick={deleteSelected} className="p-2 hover:bg-red-600 rounded-lg text-gray-300" title="Delete"><Trash2 className="w-4 h-4" /></button>
             </div>
           )}
+
+          {/* Effects (when object selected) */}
+          {selectedObject && !selectedObject._isBackground && (
+            <div className="flex items-center gap-1 border-r border-gray-600 pr-3">
+              <button onClick={() => setShowEffects(!showEffects)} className={`p-2 rounded-lg ${showEffects ? 'bg-orange-600 text-white' : 'hover:bg-gray-700 text-gray-300'}`} title="Effects (Opacity, Shadow)">
+                <SunDim className="w-5 h-5" />
+              </button>
+            </div>
+          )}
+
+          {/* Group/Ungroup */}
+          <div className="flex items-center gap-1 border-r border-gray-600 pr-3">
+            <button onClick={groupSelected} className="p-2 hover:bg-gray-700 rounded-lg text-gray-300" title="Group (Ctrl+G)"><Group className="w-4 h-4" /></button>
+            <button onClick={ungroupSelected} className="p-2 hover:bg-gray-700 rounded-lg text-gray-300" title="Ungroup (Ctrl+Shift+G)"><Ungroup className="w-4 h-4" /></button>
+          </div>
+
+          {/* Layers & Grid */}
+          <div className="flex items-center gap-1 border-r border-gray-600 pr-3">
+            <button onClick={() => { setShowLayers(!showLayers); if (!showLayers) updateLayersList(); }} className={`p-2 rounded-lg ${showLayers ? 'bg-blue-600 text-white' : 'hover:bg-gray-700 text-gray-300'}`} title="Layers Panel">
+              <Layers className="w-5 h-5" />
+            </button>
+            <button onClick={() => setSnapToGrid(!snapToGrid)} className={`p-2 rounded-lg ${snapToGrid ? 'bg-green-600 text-white' : 'hover:bg-gray-700 text-gray-300'}`} title={`Snap to Grid: ${snapToGrid ? 'ON' : 'OFF'}`}>
+              <Grid3X3 className="w-5 h-5" />
+            </button>
+          </div>
 
           {/* Canvas Actions */}
           <div className="flex items-center gap-1 ml-auto">
@@ -1159,7 +1850,23 @@ export default function EnhancedEditor({
         )}
 
         {/* Canvas */}
-        <div ref={containerRef} className="bg-gray-900 rounded-lg p-6 overflow-auto relative min-h-[500px]">
+        <div
+          ref={containerRef}
+          className={`bg-gray-900 rounded-lg p-6 overflow-auto relative min-h-[500px] transition-all ${isDraggingOver ? 'ring-4 ring-brand-500 ring-opacity-50 bg-brand-900/20' : ''}`}
+          onDragOver={handleCanvasDragOver}
+          onDragLeave={handleCanvasDragLeave}
+          onDrop={handleCanvasDrop}
+        >
+          {/* Drop overlay */}
+          {isDraggingOver && (
+            <div className="absolute inset-0 flex items-center justify-center bg-brand-900/40 z-30 pointer-events-none rounded-lg border-2 border-dashed border-brand-400">
+              <div className="text-center">
+                <Upload className="w-12 h-12 text-brand-400 mx-auto mb-2" />
+                <p className="text-brand-300 font-medium text-lg">Drop image here</p>
+                <p className="text-brand-400/70 text-sm">Image will be added as an overlay</p>
+              </div>
+            </div>
+          )}
           {(imageLoading || aiLoading) && (
             <div className="absolute inset-0 flex items-center justify-center bg-gray-900/80 z-20">
               <div className="text-center">
@@ -1190,7 +1897,7 @@ export default function EnhancedEditor({
         </div>
 
         <div className="text-sm text-gray-400 text-center">
-          Click to select • Double-click text to edit • Drag to move • Ctrl+Z to undo
+          Ctrl+C/V: Copy/Paste • Ctrl+Z/Y: Undo/Redo • Ctrl+D: Duplicate • Ctrl+G: Group • [ ]: Layer order • Delete: Remove
         </div>
       </div>
 
@@ -1334,6 +2041,312 @@ export default function EnhancedEditor({
                   <p className="text-gray-400 text-sm">{p.reasoning}</p>
                   <p className="text-gray-500 text-xs mt-1">Position: {p.x}% from left, {p.y}% from top</p>
                 </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Layers Panel - Left Side */}
+      {showLayers && (
+        <div className="absolute top-0 left-0 w-64 bg-gray-800 rounded-lg p-4 flex flex-col gap-3 max-h-[calc(100vh-200px)] overflow-y-auto shadow-2xl border border-gray-700 z-30">
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-medium text-white flex items-center gap-2">
+              <Layers className="w-5 h-5 text-blue-400" />
+              Layers
+            </h3>
+            <button onClick={() => setShowLayers(false)} className="p-1 hover:bg-gray-700 rounded">
+              <X className="w-5 h-5 text-gray-400" />
+            </button>
+          </div>
+          <div className="text-xs text-gray-500">Click to select • Eye to toggle visibility</div>
+          <div className="space-y-1">
+            {canvasObjects.length === 0 ? (
+              <p className="text-gray-500 text-sm text-center py-4">No objects on canvas</p>
+            ) : (
+              canvasObjects.map((item, index) => (
+                <div
+                  key={index}
+                  onClick={() => selectFromLayers(item.object)}
+                  className={`flex items-center gap-2 p-2 rounded-lg cursor-pointer transition ${
+                    selectedObject === item.object ? 'bg-blue-600/30 border border-blue-500' : 'hover:bg-gray-700 border border-transparent'
+                  }`}
+                >
+                  <button
+                    onClick={(e) => { e.stopPropagation(); toggleVisibility(item.object); }}
+                    className="p-1 hover:bg-gray-600 rounded"
+                  >
+                    {item.visible ? <Eye className="w-4 h-4 text-gray-300" /> : <EyeOff className="w-4 h-4 text-gray-500" />}
+                  </button>
+                  <span className={`flex-1 text-sm truncate ${item.visible ? 'text-white' : 'text-gray-500'}`}>
+                    {item.name}
+                  </span>
+                  {item.locked && <Lock className="w-3 h-3 text-yellow-500" />}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Effects Panel - Below Layers or standalone */}
+      {showEffects && selectedObject && (
+        <div className="absolute top-0 left-72 w-64 bg-gray-800 rounded-lg p-4 flex flex-col gap-4 shadow-2xl border border-gray-700 z-30">
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-medium text-white flex items-center gap-2">
+              <SunDim className="w-5 h-5 text-orange-400" />
+              Effects
+            </h3>
+            <button onClick={() => setShowEffects(false)} className="p-1 hover:bg-gray-700 rounded">
+              <X className="w-5 h-5 text-gray-400" />
+            </button>
+          </div>
+
+          {/* Opacity */}
+          <div>
+            <label className="text-sm text-gray-400 block mb-2">Opacity: {objectOpacity}%</label>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={objectOpacity}
+              onChange={(e) => updateOpacity(Number(e.target.value))}
+              className="w-full"
+            />
+          </div>
+
+          {/* Shadow */}
+          <div className="space-y-3 pt-3 border-t border-gray-700">
+            <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={shadowEnabled}
+                onChange={(e) => setShadowEnabled(e.target.checked)}
+                className="rounded"
+              />
+              Drop Shadow
+            </label>
+
+            {shadowEnabled && (
+              <div className="space-y-3 pl-2">
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">Blur: {shadowBlur}px</label>
+                  <input
+                    type="range"
+                    min={0}
+                    max={50}
+                    value={shadowBlur}
+                    onChange={(e) => setShadowBlur(Number(e.target.value))}
+                    className="w-full"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-xs text-gray-500 block mb-1">X: {shadowOffsetX}</label>
+                    <input
+                      type="range"
+                      min={-30}
+                      max={30}
+                      value={shadowOffsetX}
+                      onChange={(e) => setShadowOffsetX(Number(e.target.value))}
+                      className="w-full"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-500 block mb-1">Y: {shadowOffsetY}</label>
+                    <input
+                      type="range"
+                      min={-30}
+                      max={30}
+                      value={shadowOffsetY}
+                      onChange={(e) => setShadowOffsetY(Number(e.target.value))}
+                      className="w-full"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">Shadow Color</label>
+                  <input
+                    type="color"
+                    value={shadowColor.startsWith('rgba') ? '#000000' : shadowColor}
+                    onChange={(e) => setShadowColor(e.target.value)}
+                    className="w-full h-8 rounded cursor-pointer bg-transparent"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Animation */}
+          <div className="space-y-3 pt-3 border-t border-gray-700">
+            <label className="text-sm text-gray-300 font-medium flex items-center gap-2">
+              <RefreshCw className="w-4 h-4 text-purple-400" />
+              Animation
+            </label>
+            <select
+              value={objectAnimation}
+              onChange={(e) => {
+                setObjectAnimation(e.target.value);
+                if (selectedObject) {
+                  selectedObject.set('animation', e.target.value);
+                  if (e.target.value !== 'none' && ANIMATIONS[e.target.value as keyof typeof ANIMATIONS]) {
+                    setAnimationDuration(ANIMATIONS[e.target.value as keyof typeof ANIMATIONS].duration);
+                  }
+                }
+              }}
+              className="w-full px-3 py-2 bg-gray-700 text-white rounded-lg text-sm border border-gray-600 focus:border-brand-500"
+            >
+              <option value="none">No Animation</option>
+              {Object.entries(ANIMATIONS).map(([key, anim]) => (
+                <option key={key} value={key}>{anim.name}</option>
+              ))}
+            </select>
+
+            {objectAnimation !== 'none' && (
+              <div>
+                <label className="text-xs text-gray-500 block mb-1">Duration: {animationDuration}ms</label>
+                <input
+                  type="range"
+                  min={200}
+                  max={3000}
+                  step={100}
+                  value={animationDuration}
+                  onChange={(e) => {
+                    const dur = Number(e.target.value);
+                    setAnimationDuration(dur);
+                    if (selectedObject) {
+                      selectedObject.set('animationDuration', dur);
+                    }
+                  }}
+                  className="w-full"
+                />
+              </div>
+            )}
+
+            {objectAnimation !== 'none' && (
+              <button
+                onClick={() => setShowAnimationPreview(true)}
+                className="w-full px-3 py-2 bg-purple-500/20 text-purple-300 rounded-lg text-sm hover:bg-purple-500/30 transition flex items-center justify-center gap-2"
+              >
+                <Eye className="w-4 h-4" />
+                Preview Animation
+              </button>
+            )}
+            <p className="text-xs text-gray-500">
+              Animations play when content appears on displays
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Animation Preview Modal */}
+      {showAnimationPreview && selectedObject && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
+          <div className="bg-gray-800 rounded-xl p-6 max-w-lg w-full mx-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-white">Animation Preview</h3>
+              <button
+                onClick={() => setShowAnimationPreview(false)}
+                className="p-2 hover:bg-gray-700 rounded-lg"
+              >
+                <X className="w-5 h-5 text-gray-400" />
+              </button>
+            </div>
+            <div
+              className="bg-gray-900 rounded-lg h-48 flex items-center justify-center overflow-hidden"
+              key={`${objectAnimation}-${Date.now()}`}
+            >
+              <div
+                className="text-4xl font-bold text-white"
+                style={{
+                  animation: objectAnimation === 'fade' ? `fadeIn ${animationDuration}ms forwards` :
+                             objectAnimation === 'slide' ? `slideIn ${animationDuration}ms forwards` :
+                             objectAnimation === 'zoom' ? `zoomIn ${animationDuration}ms forwards` :
+                             objectAnimation === 'bounce' ? `bounce ${animationDuration}ms ease` : 'none',
+                  opacity: objectAnimation === 'fade' ? 0 : 1,
+                  transform: objectAnimation === 'slide' ? 'translateX(-100%)' :
+                             objectAnimation === 'zoom' ? 'scale(0)' : 'none'
+                }}
+              >
+                {selectedObject.type === 'i-text' || selectedObject.type === 'text' ? selectedObject.text : '●'}
+              </div>
+            </div>
+            <p className="text-gray-400 text-sm mt-4 text-center">
+              {ANIMATIONS[objectAnimation as keyof typeof ANIMATIONS]?.name || 'Select an animation'} - {animationDuration}ms
+            </p>
+            <button
+              onClick={() => setShowAnimationPreview(false)}
+              className="w-full mt-4 px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Animation Keyframes */}
+      <style jsx global>{`
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        @keyframes slideIn {
+          from { transform: translateX(-100%); }
+          to { transform: translateX(0); }
+        }
+        @keyframes zoomIn {
+          from { transform: scale(0); }
+          to { transform: scale(1); }
+        }
+        @keyframes bounce {
+          0%, 20%, 53%, 100% { transform: translateY(0); }
+          40% { transform: translateY(-30px); }
+          70% { transform: translateY(-15px); }
+          90% { transform: translateY(-4px); }
+        }
+      `}</style>
+
+      {/* Content Library Panel */}
+      {showLibrary && (
+        <div className="absolute top-16 left-1/2 -translate-x-1/2 w-[600px] max-w-[90vw] bg-gray-800 rounded-lg p-4 shadow-2xl border border-gray-700 z-40">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-medium text-white flex items-center gap-2">
+              <FolderOpen className="w-5 h-5 text-brand-400" />
+              Content Library
+            </h3>
+            <button onClick={() => setShowLibrary(false)} className="p-1 hover:bg-gray-700 rounded">
+              <X className="w-5 h-5 text-gray-400" />
+            </button>
+          </div>
+          <p className="text-sm text-gray-400 mb-4">Click an image to add it as an overlay</p>
+
+          {libraryLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="w-8 h-8 text-brand-400 animate-spin" />
+            </div>
+          ) : libraryContent.length === 0 ? (
+            <div className="text-center py-12">
+              <Image className="w-12 h-12 text-gray-600 mx-auto mb-3" />
+              <p className="text-gray-400">No images in your library yet</p>
+              <p className="text-gray-500 text-sm mt-1">Upload images in the Content section first</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-4 gap-3 max-h-[400px] overflow-y-auto">
+              {libraryContent.map((item) => (
+                <button
+                  key={item.id}
+                  onClick={() => addFromLibrary(item)}
+                  className="group relative aspect-square bg-gray-900 rounded-lg overflow-hidden border-2 border-transparent hover:border-brand-500 transition"
+                >
+                  <img
+                    src={item.url.startsWith('/') ? `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}${item.url}` : item.url}
+                    alt={item.name}
+                    className="w-full h-full object-cover"
+                  />
+                  <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition flex items-end p-2">
+                    <span className="text-white text-xs truncate w-full">{item.name}</span>
+                  </div>
+                </button>
               ))}
             </div>
           )}

@@ -4,7 +4,6 @@ import { useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
-  Sparkles,
   Wand2,
   FolderOpen,
   Monitor,
@@ -13,7 +12,10 @@ import {
   LogOut,
   Menu,
   X,
-  Cloud
+  Cloud,
+  Palette,
+  Calendar,
+  Eye
 } from 'lucide-react';
 import { useState } from 'react';
 import { useAuthStore } from '@/lib/store';
@@ -25,6 +27,9 @@ const navigation = [
   { name: 'Widgets', href: '/widgets', icon: Cloud },
   { name: 'Displays', href: '/displays', icon: Monitor },
   { name: 'Playlists', href: '/playlists', icon: ListVideo },
+  { name: 'Scheduling', href: '/scheduling', icon: Calendar },
+  { name: 'Live Preview', href: '/preview', icon: Eye },
+  { name: 'Brand Kit', href: '/brand-kit', icon: Palette },
 ];
 
 export default function DashboardLayout({
@@ -82,9 +87,11 @@ export default function DashboardLayout({
         <div className="flex flex-col h-full">
           {/* Logo */}
           <div className="flex items-center justify-between px-6 py-5 border-b border-gray-700">
-            <Link href="/studio" className="flex items-center gap-2 text-white">
-              <Sparkles className="w-7 h-7 text-brand-400" />
-              <span className="text-lg font-bold">TruDigital AI</span>
+            <Link href="/studio" className="flex items-center gap-3 text-white">
+              <div className="w-9 h-9 bg-gradient-to-br from-brand-400 to-brand-600 rounded-lg flex items-center justify-center">
+                <span className="text-white font-bold text-lg">tD</span>
+              </div>
+              <span className="text-lg font-bold">truDigital</span>
             </Link>
             <button
               onClick={() => setSidebarOpen(false)}
@@ -154,8 +161,10 @@ export default function DashboardLayout({
             <Menu className="w-6 h-6" />
           </button>
           <Link href="/studio" className="flex items-center gap-2 text-white">
-            <Sparkles className="w-6 h-6 text-brand-400" />
-            <span className="font-bold">TruDigital AI</span>
+            <div className="w-8 h-8 bg-gradient-to-br from-brand-400 to-brand-600 rounded-lg flex items-center justify-center">
+              <span className="text-white font-bold">tD</span>
+            </div>
+            <span className="font-bold">truDigital</span>
           </Link>
           <div className="w-6" />
         </header>

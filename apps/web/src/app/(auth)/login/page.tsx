@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Sparkles, Loader2 } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { auth } from '@/lib/api';
 import { useAuthStore } from '@/lib/store';
@@ -35,9 +35,11 @@ export default function LoginPage() {
     <div className="min-h-screen bg-gray-900 flex items-center justify-center px-4">
       <div className="max-w-md w-full">
         <div className="text-center mb-8">
-          <Link href="/" className="inline-flex items-center gap-2 text-white mb-8">
-            <Sparkles className="w-8 h-8 text-brand-400" />
-            <span className="text-xl font-bold">TruDigital AI</span>
+          <Link href="/" className="inline-flex items-center gap-3 text-white mb-8">
+            <div className="w-10 h-10 bg-gradient-to-br from-brand-400 to-brand-600 rounded-lg flex items-center justify-center">
+              <span className="text-white font-bold text-xl">tD</span>
+            </div>
+            <span className="text-xl font-bold">truDigital</span>
           </Link>
           <h1 className="text-2xl font-bold text-white">Welcome back</h1>
           <p className="text-gray-400 mt-2">Sign in to your account</p>

@@ -20,6 +20,10 @@ model Organization {
   // Brand settings
   brandColors   String[] @default([])
   logoUrl       String?
+  logoLightUrl  String?  // Logo for dark backgrounds
+  brandFonts    String[] @default(["Arial", "Georgia"])  // [heading, body]
+  brandName     String?  // Business name for auto-design
+  tagline       String?  // Business tagline
 
   // Billing
   stripeCustomerId String?
@@ -34,6 +38,7 @@ model Organization {
   folders       Folder[]
   generations   Generation[]
   playlists     Playlist[]
+  schedules     Schedule[]
 }
 
 enum Plan {
@@ -295,8 +300,62 @@ model PlaylistItem {
   // Transition
   transition    String   @default("fade")
 
+  // Item-level scheduling (optional)
+  scheduleId    String?
+  schedule      Schedule? @relation(fields: [scheduleId], references: [id])
+
   createdAt     DateTime @default(now())
 
   @@index([playlistId])
   @@index([contentId])
+  @@index([scheduleId])
+}
+
+// ============================================
+// SCHEDULES (for content scheduling)
+// ============================================
+
+model Schedule {
+  id            String   @id @default(cuid())
+  name          String
+  description   String?
+
+  // Schedule type
+  type          ScheduleRuleType @default(TIME_RANGE)
+
+  // Time-based rules
+  startTime     String?  // HH:mm format (e.g., "06:00")
+  endTime       String?  // HH:mm format (e.g., "11:00")
+
+  // Date-based rules
+  startDate     DateTime?
+  endDate       DateTime?
+
+  // Day of week (0=Sunday, 1=Monday, etc.)
+  daysOfWeek    Int[]    @default([0, 1, 2, 3, 4, 5, 6])  // All days by default
+
+  // Priority (higher = takes precedence)
+  priority      Int      @default(0)
+
+  // Active status
+  isActive      Boolean  @default(true)
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  // Items using this schedule
+  playlistItems PlaylistItem[]
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([organizationId])
+}
+
+enum ScheduleRuleType {
+  ALWAYS          // Always show
+  TIME_RANGE      // Show during specific time window (e.g., 6am-11am)
+  DATE_RANGE      // Show during date range
+  DAY_OF_WEEK     // Show on specific days
+  DATETIME_RANGE  // Combination of date and time
 }

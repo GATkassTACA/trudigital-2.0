@@ -11,6 +11,9 @@ import contentRoutes from './routes/content';
 import displayRoutes from './routes/displays';
 import playlistRoutes from './routes/playlists';
 import weatherRoutes from './routes/weather';
+import autodesignRoutes from './routes/autodesign';
+import brandkitRoutes from './routes/brandkit';
+import schedulesRoutes from './routes/schedules';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -81,11 +84,14 @@ app.get('/debug/env', (req, res) => {
 // Routes
 app.use('/api/auth', authLimiter, authRoutes);
 app.use('/api/generate', generateRoutes);
+app.use('/api/autodesign', autodesignRoutes);
 app.use('/api/edit', editRoutes);
 app.use('/api/content', contentRoutes);
 app.use('/api/displays', displayRoutes);
 app.use('/api/playlists', playlistRoutes);
 app.use('/api/weather', weatherRoutes);
+app.use('/api/brandkit', brandkitRoutes);
+app.use('/api/schedules', schedulesRoutes);
 
 // Error handler
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {

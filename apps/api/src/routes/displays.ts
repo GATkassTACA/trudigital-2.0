@@ -12,7 +12,16 @@ router.get('/', authMiddleware, async (req, res, next) => {
 
     const displays = await prisma.display.findMany({
       where: { organizationId: user.organizationId },
-      include: { playlist: true },
+      include: {
+        playlist: {
+          include: {
+            items: {
+              include: { content: true },
+              orderBy: { order: 'asc' }
+            }
+          }
+        }
+      },
       orderBy: { name: 'asc' }
     });
 
