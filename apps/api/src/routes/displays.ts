@@ -133,15 +133,13 @@ router.delete('/:id', authMiddleware, async (req, res, next) => {
 // =====================
 
 // Player heartbeat / get content
-router.get('/player/:deviceKey', async (req, res, next) => {
+router.get('/player/:deviceKey', async (req, res) => {
   try {
-    const display = await prisma.display.update({
-      where: { deviceKey: req.params.deviceKey },
-      data: {
-        status: 'ONLINE',
-        lastSeenAt: new Date(),
-        ipAddress: req.ip
-      },
+    const { deviceKey } = req.params;
+
+    // Find first, don't crash on missing key
+    const display = await prisma.display.findUnique({
+      where: { deviceKey },
       include: {
         playlist: {
           include: {
@@ -154,6 +152,20 @@ router.get('/player/:deviceKey', async (req, res, next) => {
       }
     });
 
+    if (!display) {
+      return res.status(404).json({ error: 'Display not found', deviceKey });
+    }
+
+    // Update status in background (don't block response)
+    prisma.display.update({
+      where: { id: display.id },
+      data: {
+        status: 'ONLINE',
+        lastSeenAt: new Date(),
+        ipAddress: req.ip
+      }
+    }).catch(() => {}); // swallow errors silently
+
     res.json({
       display: {
         id: display.id,
@@ -164,13 +176,14 @@ router.get('/player/:deviceKey', async (req, res, next) => {
         playlist: display.playlist
       }
     });
-  } catch (error) {
-    next(error);
+  } catch (error: any) {
+    console.error('Player fetch error:', error.message);
+    res.status(500).json({ error: 'Server error fetching display' });
   }
 });
 
 // Heartbeat only (lightweight)
-router.post('/heartbeat', async (req, res, next) => {
+router.post('/heartbeat', async (req, res) => {
   try {
     const { deviceKey } = req.body;
 
@@ -178,8 +191,13 @@ router.post('/heartbeat', async (req, res, next) => {
       return res.status(400).json({ error: 'Device key required' });
     }
 
+    const display = await prisma.display.findUnique({ where: { deviceKey } });
+    if (!display) {
+      return res.status(404).json({ error: 'Display not found' });
+    }
+
     await prisma.display.update({
-      where: { deviceKey },
+      where: { id: display.id },
       data: {
         status: 'ONLINE',
         lastSeenAt: new Date(),
@@ -188,8 +206,9 @@ router.post('/heartbeat', async (req, res, next) => {
     });
 
     res.json({ success: true });
-  } catch (error) {
-    next(error);
+  } catch (error: any) {
+    console.error('Heartbeat error:', error.message);
+    res.status(500).json({ error: 'Heartbeat failed' });
   }
 });
 

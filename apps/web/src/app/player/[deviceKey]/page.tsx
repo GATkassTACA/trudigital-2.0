@@ -2,8 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams } from 'next/navigation';
-import Image from 'next/image';
-import { Loader2, WifiOff, AlertCircle } from 'lucide-react';
+import { Loader2, WifiOff, AlertCircle, RefreshCw } from 'lucide-react';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
@@ -46,43 +45,63 @@ export default function PlayerPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [transitioning, setTransitioning] = useState(false);
-  const [offline, setOffline] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
 
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const heartbeatRef = useRef<NodeJS.Timeout | null>(null);
+  const retryRef = useRef<NodeJS.Timeout | null>(null);
 
   // Fetch display data
   const fetchDisplay = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/api/displays/player/${deviceKey}`);
+      const url = `${API_URL}/api/displays/player/${deviceKey}`;
+      console.log('[Player] Fetching:', url);
+
+      const res = await fetch(url);
 
       if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
         if (res.status === 404) {
-          setError('Display not found. Check the device key.');
+          setError(`Display not found for key "${deviceKey}". Create a display in the dashboard first.`);
         } else {
-          setError('Failed to connect to server');
+          setError(`Server error (${res.status}): ${data.error || 'Unknown error'}`);
         }
+        setLoading(false);
         return;
       }
 
       const data = await res.json();
       setDisplay(data.display);
       setError(null);
-      setOffline(false);
+      setRetryCount(0);
       setLoading(false);
-    } catch (err) {
-      console.error('Fetch error:', err);
-      setOffline(true);
+    } catch (err: any) {
+      console.error('[Player] Fetch failed:', err.message);
+      // Network error — API unreachable
+      const apiUrl = API_URL;
+      setError(
+        `Cannot reach API at ${apiUrl}. ` +
+        (apiUrl.includes('localhost')
+          ? 'Make sure the API server is running (npm run dev in apps/api).'
+          : 'Check that NEXT_PUBLIC_API_URL is configured correctly.')
+      );
       setLoading(false);
+
+      // Auto-retry with backoff
+      const delay = Math.min(5000 * Math.pow(1.5, retryCount), 30000);
+      setRetryCount((prev) => prev + 1);
+      retryRef.current = setTimeout(fetchDisplay, delay);
     }
-  }, [deviceKey]);
+  }, [deviceKey, retryCount]);
 
   // Initial fetch and polling
   useEffect(() => {
     fetchDisplay();
 
-    // Poll for updates every 30 seconds
-    const pollInterval = setInterval(fetchDisplay, 30000);
+    // Poll for playlist updates every 30 seconds (only if connected)
+    const pollInterval = setInterval(() => {
+      if (!error) fetchDisplay();
+    }, 30000);
 
     // Heartbeat every 60 seconds
     heartbeatRef.current = setInterval(async () => {
@@ -93,15 +112,16 @@ export default function PlayerPage() {
           body: JSON.stringify({ deviceKey })
         });
       } catch (err) {
-        console.error('Heartbeat failed:', err);
+        // Silent — heartbeat failure is non-critical
       }
     }, 60000);
 
     return () => {
       clearInterval(pollInterval);
       if (heartbeatRef.current) clearInterval(heartbeatRef.current);
+      if (retryRef.current) clearTimeout(retryRef.current);
     };
-  }, [deviceKey, fetchDisplay]);
+  }, [deviceKey, fetchDisplay, error]);
 
   // Auto-advance slides
   useEffect(() => {
@@ -112,19 +132,17 @@ export default function PlayerPage() {
 
     if (!currentItem) return;
 
-    // Clear existing timer
     if (timerRef.current) {
       clearTimeout(timerRef.current);
     }
 
-    // Set timer for next slide
     timerRef.current = setTimeout(() => {
       setTransitioning(true);
 
       setTimeout(() => {
         setCurrentIndex((prev) => (prev + 1) % items.length);
         setTransitioning(false);
-      }, 500); // Transition duration
+      }, 500);
     }, currentItem.duration * 1000);
 
     return () => {
@@ -139,6 +157,13 @@ export default function PlayerPage() {
     } else {
       document.documentElement.requestFullscreen();
     }
+  };
+
+  const handleRetry = () => {
+    setError(null);
+    setLoading(true);
+    setRetryCount(0);
+    fetchDisplay();
   };
 
   // Get full URL for content
@@ -157,6 +182,7 @@ export default function PlayerPage() {
           <Loader2 className="w-16 h-16 text-blue-500 animate-spin mx-auto mb-4" />
           <p className="text-white text-xl">Connecting to display...</p>
           <p className="text-gray-500 mt-2 font-mono text-sm">{deviceKey}</p>
+          <p className="text-gray-700 mt-1 text-xs">{API_URL}</p>
         </div>
       </div>
     );
@@ -166,24 +192,29 @@ export default function PlayerPage() {
   if (error) {
     return (
       <div className="fixed inset-0 bg-black flex items-center justify-center">
-        <div className="text-center">
-          <AlertCircle className="w-16 h-16 text-red-500 mx-auto mb-4" />
-          <p className="text-white text-xl mb-2">Display Error</p>
-          <p className="text-gray-400">{error}</p>
-          <p className="text-gray-600 mt-4 font-mono text-sm">{deviceKey}</p>
-        </div>
-      </div>
-    );
-  }
-
-  // Offline state
-  if (offline) {
-    return (
-      <div className="fixed inset-0 bg-black flex items-center justify-center">
-        <div className="text-center">
-          <WifiOff className="w-16 h-16 text-yellow-500 mx-auto mb-4" />
-          <p className="text-white text-xl mb-2">Connection Lost</p>
-          <p className="text-gray-400">Attempting to reconnect...</p>
+        <div className="text-center max-w-lg px-8">
+          {error.includes('Cannot reach') ? (
+            <WifiOff className="w-16 h-16 text-yellow-500 mx-auto mb-4" />
+          ) : (
+            <AlertCircle className="w-16 h-16 text-red-500 mx-auto mb-4" />
+          )}
+          <p className="text-white text-xl mb-3">
+            {error.includes('Cannot reach') ? 'Connection Failed' : 'Display Error'}
+          </p>
+          <p className="text-gray-400 text-sm mb-6">{error}</p>
+          <button
+            onClick={handleRetry}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition text-sm"
+          >
+            <RefreshCw className="w-4 h-4" />
+            Retry Now
+          </button>
+          {retryCount > 0 && (
+            <p className="text-gray-600 text-xs mt-3">
+              Auto-retrying... (attempt {retryCount})
+            </p>
+          )}
+          <p className="text-gray-700 mt-6 font-mono text-xs">Key: {deviceKey}</p>
         </div>
       </div>
     );
@@ -252,7 +283,7 @@ export default function PlayerPage() {
         )}
       </div>
 
-      {/* Progress indicator (subtle) */}
+      {/* Progress indicator */}
       <div className="absolute bottom-0 left-0 right-0 h-1 bg-black/50">
         <div
           className="h-full bg-white/30 transition-all"
@@ -262,7 +293,7 @@ export default function PlayerPage() {
         />
       </div>
 
-      {/* Debug overlay (hidden in production, show on triple-click) */}
+      {/* Debug overlay */}
       <div className="absolute top-4 right-4 text-white/20 text-xs font-mono opacity-0 hover:opacity-100 transition-opacity">
         <p>{display.name}</p>
         <p>{currentIndex + 1} / {items.length}</p>
