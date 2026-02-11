@@ -1,10 +1,12 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import { PrismaClient } from '@prisma/client';
 import { StabilityEdit } from '../services/ai/stabilityEdit';
-import { generateCopy, suggestTextPlacement, generateSignageDesign } from '../services/ai/copywriter';
+import { generateCopy, suggestTextPlacement, generateSignageDesign, critiqueDesign, adaptLayout } from '../services/ai/copywriter';
 import { authMiddleware } from '../middleware/auth';
 
 const router = Router();
+const prisma = new PrismaClient();
 
 // Initialize edit service
 const editor = new StabilityEdit(process.env.STABILITY_API_KEY || '');
@@ -347,6 +349,106 @@ router.post('/design-assist', authMiddleware, async (req, res) => {
   }
 });
 
+// ============================================
+// AI DESIGN CRITIC
+// ============================================
+
+const DesignCritiqueSchema = z.object({
+  image: z.string().min(1),
+  canvasWidth: z.number(),
+  canvasHeight: z.number(),
+  viewingDistance: z.number().optional()
+});
+
+/**
+ * AI Design Critic - analyzes design for readability, contrast, composition, brand compliance
+ */
+router.post('/design-critique', authMiddleware, async (req, res) => {
+  try {
+    const { user } = req as any;
+    const { image, canvasWidth, canvasHeight, viewingDistance } = DesignCritiqueSchema.parse(req.body);
+
+    // Get org brand settings for brand compliance check
+    const org = await prisma.organization.findUnique({
+      where: { id: user.organizationId }
+    });
+
+    const critique = await critiqueDesign(image, canvasWidth, canvasHeight, {
+      viewingDistance,
+      brandColors: org?.brandColors || [],
+      brandFonts: org?.brandFonts || [],
+      brandName: org?.brandName || undefined
+    });
+
+    res.json({
+      success: true,
+      critique
+    });
+  } catch (error: any) {
+    console.error('Design critique error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================
+// RESPONSIVE LAYOUT ADAPTATION
+// ============================================
+
+const AdaptLayoutSchema = z.object({
+  image: z.string().min(1),
+  canvasJson: z.any().optional(),
+  sourceWidth: z.number(),
+  sourceHeight: z.number(),
+  targetWidth: z.number(),
+  targetHeight: z.number()
+});
+
+/**
+ * Adapt design to new dimensions - outpaints background + repositions overlays with AI
+ */
+router.post('/adapt-layout', authMiddleware, async (req, res) => {
+  try {
+    const { image, canvasJson, sourceWidth, sourceHeight, targetWidth, targetHeight } =
+      AdaptLayoutSchema.parse(req.body);
+
+    // Step 1: Outpaint the background image to target dimensions
+    const bgResult = await editor.outpaintToSize(
+      image,
+      sourceWidth,
+      sourceHeight,
+      targetWidth,
+      targetHeight
+    );
+
+    if (!bgResult.success) {
+      return res.status(400).json({ error: bgResult.error || 'Failed to adapt background' });
+    }
+
+    // Step 2: If canvas has overlays, use Claude to reposition them
+    let adaptedLayout = undefined;
+    if (canvasJson && canvasJson.objects && canvasJson.objects.length > 1) {
+      adaptedLayout = await adaptLayout(
+        image,
+        canvasJson,
+        sourceWidth,
+        sourceHeight,
+        targetWidth,
+        targetHeight
+      );
+    }
+
+    res.json({
+      success: true,
+      backgroundImage: bgResult.image?.url,
+      adaptedLayout,
+      creditsUsed: bgResult.creditsUsed
+    });
+  } catch (error: any) {
+    console.error('Adapt layout error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 /**
  * Get available editing capabilities
  */
@@ -420,6 +522,18 @@ router.get('/capabilities', (req, res) => {
         name: 'Design Assistant',
         description: 'Complete copy + placement suggestions',
         cost: 0
+      },
+      {
+        id: 'design-critique',
+        name: 'AI Design Critic',
+        description: 'Analyze readability, contrast, composition & brand compliance',
+        cost: 0
+      },
+      {
+        id: 'adapt-layout',
+        name: 'Responsive Adaptation',
+        description: 'AI-powered redesign for different aspect ratios',
+        cost: '4-16 (outpaint) + 0 (layout AI)'
       }
     ]
   });

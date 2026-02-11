@@ -53,7 +53,11 @@ import {
   Grid3X3,
   SunDim,
   FolderOpen,
-  Image
+  Image,
+  CheckCircle,
+  AlertTriangle,
+  Info,
+  Maximize2
 } from 'lucide-react';
 import { TEMPLATES, TEMPLATE_CATEGORIES, Template, ANIMATIONS } from './templates';
 import { edit, content } from '@/lib/api';
@@ -135,6 +139,14 @@ interface PlacementSuggestion {
   };
 }
 
+const ADAPT_PRESETS = [
+  { label: 'Portrait', width: 768, height: 1344 },
+  { label: 'Landscape', width: 1344, height: 768 },
+  { label: 'Square', width: 1024, height: 1024 },
+  { label: 'Ultra-wide', width: 1536, height: 640 },
+  { label: 'Menu Board', width: 896, height: 1152 },
+];
+
 export default function EnhancedEditor({
   backgroundImage,
   width = 1344,
@@ -192,6 +204,24 @@ export default function EnhancedEditor({
   const [copyResult, setCopyResult] = useState<CopyResult | null>(null);
   const [placementSuggestions, setPlacementSuggestions] = useState<PlacementSuggestion | null>(null);
   const [copyLoading, setCopyLoading] = useState(false);
+
+  // AI Design Critic state
+  const [showCritique, setShowCritique] = useState(false);
+  const [critiqueLoading, setCritiqueLoading] = useState(false);
+  const [critiqueResult, setCritiqueResult] = useState<{
+    score: number;
+    issues: Array<{
+      severity: 'error' | 'warning' | 'info';
+      category: string;
+      message: string;
+      suggestion: string;
+    }>;
+    summary: string;
+  } | null>(null);
+
+  // Responsive Adaptation state
+  const [showAdaptMenu, setShowAdaptMenu] = useState(false);
+  const [adaptLoading, setAdaptLoading] = useState(false);
 
   // Mask drawing state
   const [isDrawing, setIsDrawing] = useState(false);
@@ -857,6 +887,126 @@ export default function EnhancedEditor({
       toast.error('Failed to analyze image');
     } finally {
       setCopyLoading(false);
+    }
+  };
+
+  // AI Design Critic handler
+  const handleCritique = async () => {
+    setCritiqueLoading(true);
+    setShowCritique(true);
+    try {
+      const imageBase64 = getCanvasBase64();
+      const response = await edit.designCritique(imageBase64, width, height);
+      if (response.data.success) {
+        setCritiqueResult(response.data.critique);
+        toast.success('Design analysis complete!');
+      }
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Failed to analyze design');
+    } finally {
+      setCritiqueLoading(false);
+    }
+  };
+
+  // Responsive Adaptation handler
+  const handleAdapt = async (targetWidth: number, targetHeight: number) => {
+    setAdaptLoading(true);
+    setShowAdaptMenu(false);
+    try {
+      const imageBase64 = getCanvasBase64();
+      const canvasJson = fabricCanvasRef.current?.toJSON(['data']);
+      const response = await edit.adaptLayout({
+        image: imageBase64,
+        canvasJson,
+        sourceWidth: width,
+        sourceHeight: height,
+        targetWidth,
+        targetHeight
+      });
+      if (response.data.success) {
+        const canvas = fabricCanvasRef.current;
+        const fabric = fabricRef.current;
+        if (!canvas || !fabric) return;
+
+        // Load the adapted background
+        const bgUrl = response.data.backgroundImage;
+        const bgDataUrl = bgUrl.startsWith('data:') ? bgUrl : `data:image/png;base64,${bgUrl}`;
+
+        // Clear canvas and set new dimensions
+        canvas.clear();
+        canvas.setDimensions({ width: targetWidth, height: targetHeight });
+
+        // Add background image
+        const img = await fabric.FabricImage.fromURL(bgDataUrl);
+        img.scaleToWidth(targetWidth);
+        img.scaleToHeight(targetHeight);
+        img.set({ selectable: false, evented: false, data: { _isBackground: true } });
+        canvas.add(img);
+        canvas.sendObjectToBack(img);
+
+        // Apply repositioned overlays if returned
+        if (response.data.adaptedLayout?.elements) {
+          const originalObjects = canvasJson?.objects || [];
+          for (let i = 0; i < response.data.adaptedLayout.elements.length; i++) {
+            const adapted = response.data.adaptedLayout.elements[i];
+            const original = originalObjects.filter((o: any) => o.type !== 'image' || !o.data?._isBackground)[i];
+            if (!original) continue;
+
+            if (original.type === 'textbox' || original.type === 'i-text') {
+              const textObj = new fabric.Textbox(adapted.text || original.text, {
+                left: adapted.left,
+                top: adapted.top,
+                width: adapted.width || original.width,
+                fontSize: adapted.fontSize || original.fontSize,
+                fontFamily: original.fontFamily || 'Arial',
+                fill: original.fill || '#ffffff',
+                fontWeight: original.fontWeight,
+                fontStyle: original.fontStyle,
+                textAlign: original.textAlign,
+              });
+              canvas.add(textObj);
+            } else if (original.type === 'rect') {
+              const rect = new fabric.Rect({
+                left: adapted.left,
+                top: adapted.top,
+                width: adapted.width || original.width,
+                height: adapted.height || original.height,
+                fill: original.fill,
+                rx: original.rx,
+                ry: original.ry,
+                opacity: original.opacity,
+              });
+              canvas.add(rect);
+            } else if (original.type === 'circle') {
+              const circle = new fabric.Circle({
+                left: adapted.left,
+                top: adapted.top,
+                radius: original.radius ? original.radius * ((adapted.scaleX || 1)) : (adapted.width || 50) / 2,
+                fill: original.fill,
+                opacity: original.opacity,
+              });
+              canvas.add(circle);
+            } else if (original.type === 'triangle') {
+              const tri = new fabric.Triangle({
+                left: adapted.left,
+                top: adapted.top,
+                width: adapted.width || original.width,
+                height: adapted.height || original.height,
+                fill: original.fill,
+                opacity: original.opacity,
+              });
+              canvas.add(tri);
+            }
+          }
+        }
+
+        canvas.renderAll();
+        toast.success(`Adapted to ${targetWidth}x${targetHeight}!`);
+      }
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Failed to adapt design');
+    } finally {
+      setAdaptLoading(false);
     }
   };
 
@@ -1629,6 +1779,16 @@ export default function EnhancedEditor({
                     <div className="text-xs text-gray-400">Paint area, describe content</div>
                   </div>
                 </button>
+
+                <div className="border-t border-gray-700 my-2" />
+                <div className="text-xs text-gray-400 px-2 py-1 font-medium">Analysis</div>
+                <button onClick={() => { handleCritique(); setShowAIMenu(false); }} className="w-full flex items-center gap-3 px-3 py-2 hover:bg-gray-700 rounded-lg text-left">
+                  <CheckCircle className="w-4 h-4 text-yellow-400" />
+                  <div>
+                    <div className="text-sm text-white">AI Design Critic</div>
+                    <div className="text-xs text-gray-400">Check readability, contrast & composition</div>
+                  </div>
+                </button>
               </div>
             )}
           </div>
@@ -1770,6 +1930,36 @@ export default function EnhancedEditor({
           {/* Canvas Actions */}
           <div className="flex items-center gap-1 ml-auto">
             <button onClick={clearCanvas} className="p-2 hover:bg-gray-700 rounded-lg text-gray-300" title="Clear"><RotateCcw className="w-4 h-4" /></button>
+
+            {/* Responsive Adapt */}
+            <div className="relative">
+              <button
+                onClick={() => setShowAdaptMenu(!showAdaptMenu)}
+                disabled={adaptLoading}
+                className="flex items-center gap-2 px-3 py-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white rounded-lg"
+                title="Adapt design to different screen sizes"
+              >
+                {adaptLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Maximize2 className="w-4 h-4" />}
+                Adapt
+              </button>
+              {showAdaptMenu && (
+                <div className="absolute top-full right-0 mt-1 bg-gray-800 rounded-lg shadow-xl border border-gray-700 p-2 min-w-[200px] z-50">
+                  <div className="text-xs text-gray-400 px-2 py-1 font-medium">Adapt to size</div>
+                  {ADAPT_PRESETS.map((preset) => (
+                    <button
+                      key={preset.label}
+                      onClick={() => handleAdapt(preset.width, preset.height)}
+                      disabled={width === preset.width && height === preset.height}
+                      className="w-full flex items-center justify-between px-3 py-2 hover:bg-gray-700 rounded-lg text-left disabled:opacity-30"
+                    >
+                      <span className="text-sm text-white">{preset.label}</span>
+                      <span className="text-xs text-gray-400">{preset.width}x{preset.height}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
             {onCanvaEdit && (
               <button onClick={onCanvaEdit} className="flex items-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg">
                 <Palette className="w-4 h-4" />Canva
@@ -2043,6 +2233,101 @@ export default function EnhancedEditor({
                 </div>
               ))}
             </div>
+          )}
+        </div>
+      )}
+
+      {/* AI Design Critique Panel - Overlay */}
+      {showCritique && (
+        <div className="absolute top-0 right-0 w-80 bg-gray-800 rounded-lg p-4 flex flex-col gap-4 max-h-[calc(100vh-200px)] overflow-y-auto shadow-2xl border border-gray-700 z-30">
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-medium text-white flex items-center gap-2">
+              <CheckCircle className="w-5 h-5 text-yellow-400" />
+              Design Critique
+            </h3>
+            <button onClick={() => setShowCritique(false)} className="p-1 hover:bg-gray-700 rounded">
+              <X className="w-5 h-5 text-gray-400" />
+            </button>
+          </div>
+
+          {critiqueLoading && (
+            <div className="flex flex-col items-center justify-center py-8 gap-3">
+              <Loader2 className="w-8 h-8 text-purple-400 animate-spin" />
+              <p className="text-sm text-gray-400">Analyzing your design...</p>
+            </div>
+          )}
+
+          {critiqueResult && !critiqueLoading && (
+            <>
+              {/* Score Badge */}
+              <div className="flex items-center gap-3">
+                <div className={`w-16 h-16 rounded-full flex items-center justify-center text-2xl font-bold ${
+                  critiqueResult.score >= 80 ? 'bg-green-600/20 text-green-400 border-2 border-green-500' :
+                  critiqueResult.score >= 60 ? 'bg-yellow-600/20 text-yellow-400 border-2 border-yellow-500' :
+                  'bg-red-600/20 text-red-400 border-2 border-red-500'
+                }`}>
+                  {critiqueResult.score}
+                </div>
+                <div className="flex-1">
+                  <div className={`text-sm font-medium ${
+                    critiqueResult.score >= 80 ? 'text-green-400' :
+                    critiqueResult.score >= 60 ? 'text-yellow-400' :
+                    'text-red-400'
+                  }`}>
+                    {critiqueResult.score >= 80 ? 'Great Design' :
+                     critiqueResult.score >= 60 ? 'Needs Improvement' :
+                     'Major Issues'}
+                  </div>
+                  <p className="text-xs text-gray-400 mt-1">{critiqueResult.summary}</p>
+                </div>
+              </div>
+
+              {/* Issues List */}
+              {critiqueResult.issues.length > 0 && (
+                <div className="space-y-2">
+                  <div className="text-xs text-gray-400 font-medium">Issues Found ({critiqueResult.issues.length})</div>
+                  {critiqueResult.issues.map((issue, i) => (
+                    <div key={i} className="bg-gray-900 rounded-lg p-3">
+                      <div className="flex items-center gap-2 mb-1">
+                        {issue.severity === 'error' ? (
+                          <AlertTriangle className="w-3.5 h-3.5 text-red-400 shrink-0" />
+                        ) : issue.severity === 'warning' ? (
+                          <AlertTriangle className="w-3.5 h-3.5 text-yellow-400 shrink-0" />
+                        ) : (
+                          <Info className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                        )}
+                        <span className={`text-xs px-1.5 py-0.5 rounded ${
+                          issue.severity === 'error' ? 'bg-red-900/50 text-red-300' :
+                          issue.severity === 'warning' ? 'bg-yellow-900/50 text-yellow-300' :
+                          'bg-blue-900/50 text-blue-300'
+                        }`}>
+                          {issue.category}
+                        </span>
+                      </div>
+                      <p className="text-sm text-gray-300">{issue.message}</p>
+                      <p className="text-xs text-gray-500 mt-1">{issue.suggestion}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {critiqueResult.issues.length === 0 && (
+                <div className="text-center py-4">
+                  <CheckCircle className="w-8 h-8 text-green-400 mx-auto mb-2" />
+                  <p className="text-sm text-gray-400">No issues found! Your design looks great.</p>
+                </div>
+              )}
+
+              {/* Re-analyze button */}
+              <button
+                onClick={handleCritique}
+                disabled={critiqueLoading}
+                className="flex items-center justify-center gap-2 px-3 py-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white rounded-lg text-sm"
+              >
+                <RefreshCw className="w-4 h-4" />
+                Re-analyze
+              </button>
+            </>
           )}
         </div>
       )}

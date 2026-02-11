@@ -404,7 +404,7 @@ export const TEMPLATES: Template[] = [
 
 export const TEMPLATE_CATEGORIES = Array.from(new Set(TEMPLATES.map(t => t.category)));
 
-// Animation presets for signage
+// Animation presets for signage (CSS-based, for editor preview)
 export const ANIMATIONS = {
   fade: {
     name: 'Fade In',
@@ -427,3 +427,29 @@ export const ANIMATIONS = {
     css: 'animation: bounce 1s ease;'
   }
 };
+
+// GSAP-based transition presets for the player
+export const TRANSITION_PRESETS = {
+  'fade':        { type: 'fade', duration: 800, easing: 'power2.inOut' },
+  'slide-left':  { type: 'slide', direction: 'left', duration: 800, easing: 'power2.inOut' },
+  'slide-right': { type: 'slide', direction: 'right', duration: 800, easing: 'power2.inOut' },
+  'slide-up':    { type: 'slide', direction: 'up', duration: 800, easing: 'power2.inOut' },
+  'slide-down':  { type: 'slide', direction: 'down', duration: 800, easing: 'power2.inOut' },
+  'zoom':        { type: 'zoom', duration: 800, easing: 'power2.inOut' },
+  'none':        { type: 'none', duration: 0, easing: 'none' },
+} as const;
+
+export type TransitionPresetKey = keyof typeof TRANSITION_PRESETS;
+
+// Per-element animation presets (stored on Fabric object data)
+export const ELEMENT_ANIMATIONS = {
+  'none':           { type: 'none', duration: 0 },
+  'fade-in':        { type: 'fade', direction: 'in', duration: 1000, easing: 'power2.out' },
+  'slide-in-left':  { type: 'slide', direction: 'left', duration: 800, easing: 'power2.out' },
+  'slide-in-right': { type: 'slide', direction: 'right', duration: 800, easing: 'power2.out' },
+  'slide-in-up':    { type: 'slide', direction: 'up', duration: 800, easing: 'power2.out' },
+  'zoom-in':        { type: 'zoom', direction: 'in', duration: 600, easing: 'back.out(1.7)' },
+  'bounce-in':      { type: 'bounce', duration: 1000, easing: 'bounce.out' },
+} as const;
+
+export type ElementAnimationKey = keyof typeof ELEMENT_ANIMATIONS;

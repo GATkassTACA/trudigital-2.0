@@ -117,7 +117,7 @@ router.delete('/:id', authMiddleware, async (req, res, next) => {
 router.post('/:id/items', authMiddleware, async (req, res, next) => {
   try {
     const { user } = req as any;
-    const { contentId, duration, order, transition } = req.body;
+    const { contentId, duration, order, transition, transitionData } = req.body;
 
     // Verify playlist belongs to org
     const playlist = await prisma.playlist.findFirst({
@@ -137,7 +137,8 @@ router.post('/:id/items', authMiddleware, async (req, res, next) => {
         contentId,
         duration: duration || 10,
         order: order || 0,
-        transition: transition || 'fade'
+        transition: transition || 'fade',
+        ...(transitionData && { transitionData })
       },
       include: { content: true }
     });

@@ -26,11 +26,15 @@ export type { EditResult } from './stabilityEdit';
 export {
   generateCopy,
   suggestTextPlacement,
-  generateSignageDesign
+  generateSignageDesign,
+  critiqueDesign,
+  adaptLayout
 } from './copywriter';
 export type {
   CopywriterInput,
   CopywriterOutput,
   TextPlacement,
-  TextPlacementSuggestion
+  TextPlacementSuggestion,
+  DesignCritique,
+  AdaptedLayout
 } from './copywriter';

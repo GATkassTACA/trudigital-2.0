@@ -299,6 +299,7 @@ model PlaylistItem {
 
   // Transition
   transition    String   @default("fade")
+  transitionData Json?    // Structured: { type, duration, easing, direction }
 
   // Item-level scheduling (optional)
   scheduleId    String?

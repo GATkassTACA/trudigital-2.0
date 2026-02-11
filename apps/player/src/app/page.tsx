@@ -2,15 +2,25 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import Image from 'next/image';
+import gsap from 'gsap';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 const HEARTBEAT_INTERVAL = 30000; // 30 seconds
 const DEFAULT_DURATION = 10; // 10 seconds per slide if not specified
 
+interface TransitionData {
+  type: 'fade' | 'slide' | 'zoom' | 'none';
+  duration?: number;
+  easing?: string;
+  direction?: 'left' | 'right' | 'up' | 'down';
+}
+
 interface ContentItem {
   id: string;
   duration: number;
   order: number;
+  transition?: string;
+  transitionData?: TransitionData;
   content: {
     id: string;
     name: string;
@@ -32,15 +42,62 @@ interface DisplayData {
   playlist?: PlaylistData;
 }
 
+// Parse legacy transition string into structured data
+function parseTransition(item: ContentItem): TransitionData {
+  if (item.transitionData) return item.transitionData;
+
+  // Backward compat: parse the old string field
+  const t = item.transition || 'fade';
+  switch (t) {
+    case 'fade': return { type: 'fade', duration: 800, easing: 'power2.inOut' };
+    case 'slide': case 'slide-left': return { type: 'slide', direction: 'left', duration: 800, easing: 'power2.inOut' };
+    case 'slide-right': return { type: 'slide', direction: 'right', duration: 800, easing: 'power2.inOut' };
+    case 'slide-up': return { type: 'slide', direction: 'up', duration: 800, easing: 'power2.inOut' };
+    case 'slide-down': return { type: 'slide', direction: 'down', duration: 800, easing: 'power2.inOut' };
+    case 'zoom': return { type: 'zoom', duration: 800, easing: 'power2.inOut' };
+    case 'none': return { type: 'none', duration: 0 };
+    default: return { type: 'fade', duration: 800, easing: 'power2.inOut' };
+  }
+}
+
+function SlideContent({ item }: { item: ContentItem }) {
+  if (item.content.type === 'VIDEO') {
+    return (
+      <video
+        src={item.content.url}
+        className="w-full h-full object-contain"
+        autoPlay
+        muted
+        loop
+      />
+    );
+  }
+
+  return (
+    <Image
+      src={item.content.url}
+      alt={item.content.name}
+      fill
+      className="object-contain"
+      priority
+    />
+  );
+}
+
 export default function PlayerPage() {
   const [deviceKey, setDeviceKey] = useState<string | null>(null);
   const [display, setDisplay] = useState<DisplayData | null>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [nextIndex, setNextIndex] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isOnline, setIsOnline] = useState(true);
+
   const heartbeatRef = useRef<NodeJS.Timeout | null>(null);
   const slideTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const currentSlideRef = useRef<HTMLDivElement>(null);
+  const nextSlideRef = useRef<HTMLDivElement>(null);
+  const isTransitioning = useRef(false);
 
   // Get device key from URL
   useEffect(() => {
@@ -102,10 +159,7 @@ export default function PlayerPage() {
     fetchDisplay();
     sendHeartbeat();
 
-    // Set up heartbeat interval
     heartbeatRef.current = setInterval(sendHeartbeat, HEARTBEAT_INTERVAL);
-
-    // Refresh display data every 5 minutes
     const refreshInterval = setInterval(fetchDisplay, 300000);
 
     return () => {
@@ -114,22 +168,81 @@ export default function PlayerPage() {
     };
   }, [deviceKey, fetchDisplay, sendHeartbeat]);
 
-  // Content rotation
-  useEffect(() => {
-    if (!display?.playlist?.items?.length) return;
+  // GSAP transition function
+  const performTransition = useCallback((items: ContentItem[]) => {
+    if (isTransitioning.current || !currentSlideRef.current || !nextSlideRef.current) return;
+    isTransitioning.current = true;
 
-    const items = display.playlist.items;
+    const current = currentSlideRef.current;
+    const next = nextSlideRef.current;
+
+    // Get transition config from the NEXT item (the one we're transitioning TO)
+    const nextItem = items[nextIndex];
+    const config = parseTransition(nextItem);
+    const durationSec = (config.duration || 800) / 1000;
+    const ease = config.easing || 'power2.inOut';
+
+    const tl = gsap.timeline({
+      onComplete: () => {
+        setCurrentIndex(nextIndex);
+        setNextIndex((nextIndex + 1) % items.length);
+        gsap.set(current, { clearProps: 'all', opacity: 1 });
+        gsap.set(next, { clearProps: 'all', opacity: 0 });
+        isTransitioning.current = false;
+      }
+    });
+
+    switch (config.type) {
+      case 'fade':
+        tl.to(current, { opacity: 0, duration: durationSec, ease })
+          .fromTo(next, { opacity: 0 }, { opacity: 1, duration: durationSec, ease }, 0);
+        break;
+
+      case 'slide': {
+        const dir = config.direction || 'left';
+        const xOut = dir === 'left' ? '-100%' : dir === 'right' ? '100%' : '0';
+        const yOut = dir === 'up' ? '-100%' : dir === 'down' ? '100%' : '0';
+        const xIn = dir === 'left' ? '100%' : dir === 'right' ? '-100%' : '0';
+        const yIn = dir === 'up' ? '100%' : dir === 'down' ? '-100%' : '0';
+        tl.set(next, { opacity: 1 })
+          .to(current, { x: xOut, y: yOut, duration: durationSec, ease })
+          .fromTo(next, { x: xIn, y: yIn }, { x: '0', y: '0', duration: durationSec, ease }, 0);
+        break;
+      }
+
+      case 'zoom':
+        tl.to(current, { scale: 0.8, opacity: 0, duration: durationSec, ease })
+          .fromTo(next, { scale: 1.2, opacity: 0 }, { scale: 1, opacity: 1, duration: durationSec, ease }, 0);
+        break;
+
+      default: // 'none' or unknown
+        tl.set(current, { opacity: 0 }).set(next, { opacity: 1 });
+    }
+  }, [nextIndex]);
+
+  // Content rotation with GSAP transitions
+  useEffect(() => {
+    const items = display?.playlist?.items;
+    if (!items?.length || items.length < 2) return;
+
     const currentItem = items[currentIndex];
     const duration = (currentItem?.duration || DEFAULT_DURATION) * 1000;
 
     slideTimerRef.current = setTimeout(() => {
-      setCurrentIndex((prev) => (prev + 1) % items.length);
+      performTransition(items);
     }, duration);
 
     return () => {
       if (slideTimerRef.current) clearTimeout(slideTimerRef.current);
     };
-  }, [currentIndex, display]);
+  }, [currentIndex, display, performTransition]);
+
+  // Single item — no transitions needed, just display it
+  useEffect(() => {
+    const items = display?.playlist?.items;
+    if (!items?.length || items.length !== 1) return;
+    // Nothing to rotate, single item stays on screen
+  }, [display]);
 
   // Loading state
   if (loading) {
@@ -186,37 +299,25 @@ export default function PlayerPage() {
     );
   }
 
-  // Display content
+  // Display content with GSAP transitions
   const items = display.playlist.items;
-  const currentItem = items[currentIndex];
 
   return (
     <div className="w-screen h-screen bg-black relative overflow-hidden">
-      {/* Status indicator (top right, small) */}
+      {/* Status indicator */}
       <div className="absolute top-4 right-4 z-50 flex items-center gap-2">
         <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-500' : 'bg-yellow-500 animate-pulse'}`} />
       </div>
 
-      {/* Content */}
-      {currentItem?.content?.type === 'VIDEO' ? (
-        <video
-          key={currentItem.id}
-          src={currentItem.content.url}
-          className="w-full h-full object-contain"
-          autoPlay
-          muted
-          onEnded={() => setCurrentIndex((prev) => (prev + 1) % items.length)}
-        />
-      ) : (
-        <div className="w-full h-full relative">
-          <Image
-            key={currentItem.id}
-            src={currentItem.content.url}
-            alt={currentItem.content.name}
-            fill
-            className="object-contain"
-            priority
-          />
+      {/* Current slide */}
+      <div ref={currentSlideRef} className="absolute inset-0">
+        {items[currentIndex] && <SlideContent item={items[currentIndex]} />}
+      </div>
+
+      {/* Next slide (hidden, used for transitions) */}
+      {items.length > 1 && (
+        <div ref={nextSlideRef} className="absolute inset-0 opacity-0">
+          {items[nextIndex] && <SlideContent item={items[nextIndex]} />}
         </div>
       )}
 

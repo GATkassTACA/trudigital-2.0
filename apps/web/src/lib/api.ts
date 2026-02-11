@@ -101,8 +101,8 @@ export const playlists = {
   create: (name: string) => api.post('/api/playlists', { name }),
   update: (id: string, data: any) => api.patch(`/api/playlists/${id}`, data),
   delete: (id: string) => api.delete(`/api/playlists/${id}`),
-  addItem: (id: string, contentId: string, duration?: number) =>
-    api.post(`/api/playlists/${id}/items`, { contentId, duration }),
+  addItem: (id: string, contentId: string, duration?: number, transition?: string, transitionData?: { type: string; duration?: number; easing?: string; direction?: string }) =>
+    api.post(`/api/playlists/${id}/items`, { contentId, duration, transition, transitionData }),
   removeItem: (id: string, itemId: string) =>
     api.delete(`/api/playlists/${id}/items/${itemId}`),
   reorder: (id: string, items: { id: string; order: number }[]) =>
@@ -167,6 +167,20 @@ export const edit = {
     api.post('/api/edit/suggest-placement', { image, canvasWidth, canvasHeight }),
   designAssist: (image: string, context: string, canvasWidth: number, canvasHeight: number, tone?: string, brandName?: string) =>
     api.post('/api/edit/design-assist', { image, context, canvasWidth, canvasHeight, tone, brandName }),
+
+  // AI Design Critic
+  designCritique: (image: string, canvasWidth: number, canvasHeight: number, viewingDistance?: number) =>
+    api.post('/api/edit/design-critique', { image, canvasWidth, canvasHeight, viewingDistance }),
+
+  // Responsive Adaptation
+  adaptLayout: (data: {
+    image: string;
+    canvasJson?: any;
+    sourceWidth: number;
+    sourceHeight: number;
+    targetWidth: number;
+    targetHeight: number;
+  }) => api.post('/api/edit/adapt-layout', data),
 
   // Get capabilities
   capabilities: () => api.get('/api/edit/capabilities'),
