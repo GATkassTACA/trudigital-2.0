@@ -180,18 +180,30 @@ async function planPlaylistSlides(
   industry?: string,
   vibe?: string
 ): Promise<SlidePlan[]> {
-  const systemPrompt = `You are an expert signage content strategist. Given a business description, you plan a multi-slide digital signage playlist.
+  const systemPrompt = `You are a senior creative director at a top digital out-of-home (DOOH) advertising agency with 20 years of experience writing copy for LED billboards, retail displays, QSR menu boards, and lobby screens.
 
-Each slide serves a specific purpose in a cohesive content rotation. The slides should tell a story that draws viewers in and drives action.
+You understand the fundamental truth of signage: people glance for 3-8 seconds. Every word must justify its existence. You write copy that stops foot traffic and drives action.
 
-Rules:
-- Headlines: 3-7 words, punchy, no generic filler
-- Subheadlines: 5-15 words, supporting detail
-- Image prompts: Describe a BACKGROUND image only. NO text, words, letters, or typography in the image.
-- Image prompts should be detailed, cinematic, and optimized for Stability AI SDXL
-- textColor must contrast well with the expected image (usually #FFFFFF or #000000)
-- Transitions should vary: fade, slide-left, slide-right, zoom
-- Each slide should have a distinct purpose: welcome, services, promo, testimonial, cta, info, atmosphere`;
+YOUR COPY PRINCIPLES:
+1. SPECIFICITY SELLS — "Smoked 14 Hours Over Hickory" beats "Quality BBQ". Use real details from the business description. Numbers, ingredients, years in business, neighborhood names — concrete beats abstract every time.
+2. ONE IDEA PER SLIDE — Each slide has exactly one job. Don't cram. A promo slide promotes. An atmosphere slide sets mood. Never both.
+3. HEADLINE = HOOK — 2-6 words max. Must work at a glance from 15 feet away. Use active voice, strong verbs, unexpected phrasing. NEVER use: "Welcome", "Our Services", "Experience Excellence", "Quality You Can Trust", or any corporate filler.
+4. SUBHEADLINE = PAYOFF — 6-12 words. Adds the detail that makes the headline land. Answers "why should I care?" Be specific to THIS business.
+5. NARRATIVE ARC — The slides form a sequence. Open with intrigue or appetite appeal, build through differentiators, close with a clear CTA. Think of it as a 30-second story told in ${'{slideCount}'} frames.
+6. MATCH THE VOICE — A tattoo parlor and a law firm don't sound the same. Extract the brand's personality from the description and write in THEIR voice, not generic marketing-speak.
+7. CTA = SPECIFIC ACTION — "Order at the Counter" beats "Visit Us Today". "Book Your Free Consult" beats "Get Started". Tell them exactly what to do.
+
+IMAGE PROMPT RULES:
+- Describe a BACKGROUND image only. Absolutely NO text, words, letters, numbers, signage, or typography in the image.
+- Be cinematically specific: lighting direction, depth of field, color temperature, material textures, camera angle
+- Each image should evoke a distinct emotion that matches its slide's purpose
+- Use the business details to ground images in reality — if they mention exposed brick, put exposed brick in the prompt
+- Prompts must be optimized for Stability AI SDXL: 20-40 words, descriptive, no abstract concepts
+
+TECHNICAL:
+- textColor: #FFFFFF for dark/moody images, #000000 or dark hex for bright/light images
+- Transitions: vary between fade, slide-left, slide-right, zoom — use zoom sparingly for emphasis
+- purpose values: hook, differentiator, product, atmosphere, social-proof, promo, cta`;
 
   const brandContext = brandKit.brandName
     ? `\nBRAND: ${brandKit.brandName}${brandKit.tagline ? ` - "${brandKit.tagline}"` : ''}`
@@ -200,22 +212,24 @@ Rules:
     ? `\nBRAND COLORS: ${brandKit.brandColors.join(', ')}`
     : '';
 
-  const userMessage = `Plan a ${slideCount}-slide digital signage playlist.
+  const userMessage = `Plan a ${slideCount}-slide digital signage playlist for this specific business. Mine the description for real details — names, products, atmosphere, differentiators. Generic copy is failure.
 
-BUSINESS: ${description}
+BUSINESS DESCRIPTION: ${description}
 ${industry ? `INDUSTRY: ${industry}` : ''}
-${vibe ? `VIBE/MOOD: ${vibe}` : ''}${brandContext}${colorContext}
+${vibe ? `DESIRED VIBE: ${vibe}` : ''}${brandContext}${colorContext}
 
-Respond with ONLY a JSON object in this exact format:
+CRITICAL: Do NOT use filler headlines like "Welcome", "Our Services", "Experience the Difference", "Quality You Trust". Every headline must be specific to THIS business. If they make pizza, the headline should smell like pizza. If they're a law firm, it should feel like authority.
+
+Respond with ONLY a JSON object:
 {
   "slides": [
     {
-      "purpose": "welcome",
-      "headline": "Short Punchy Headline",
-      "subheadline": "Supporting text with more detail here",
-      "imagePrompt": "Detailed background image description for AI generation, no text",
+      "purpose": "hook",
+      "headline": "Fired at 900 Degrees",
+      "subheadline": "Neapolitan pizza the way Naples intended — since 2012",
+      "imagePrompt": "Close-up wood-fired pizza oven with flames licking the dome, warm orange glow, shallow depth of field, rustic brick interior, smoke wisps, cinematic food photography",
       "style": "photographic",
-      "mood": "warm",
+      "mood": "appetizing",
       "textColor": "#FFFFFF",
       "transition": "fade"
     }
@@ -252,54 +266,55 @@ Respond with ONLY a JSON object in this exact format:
  * Fallback slides if Claude fails
  */
 function getFallbackSlides(count: number, industry?: string): SlidePlan[] {
+  const ind = industry?.toLowerCase() || 'business';
   const base: SlidePlan[] = [
     {
-      purpose: 'welcome',
-      headline: 'Welcome',
-      subheadline: 'We\'re glad you\'re here',
-      imagePrompt: `Professional welcoming ${industry || 'business'} interior, warm lighting, modern design, clean and inviting atmosphere`,
+      purpose: 'hook',
+      headline: 'Made Different Here',
+      subheadline: `The ${ind} experience your neighborhood has been waiting for`,
+      imagePrompt: `Dramatic interior of a modern ${ind} space, warm golden hour lighting through large windows, shallow depth of field, cinematic composition, inviting atmosphere`,
       style: 'photographic',
-      mood: 'warm',
+      mood: 'intriguing',
       textColor: '#FFFFFF',
       transition: 'fade',
     },
     {
-      purpose: 'services',
-      headline: 'Our Services',
-      subheadline: 'Quality you can count on',
-      imagePrompt: `Abstract professional background with soft gradients, ${industry || 'business'} themed, modern corporate aesthetic`,
-      style: 'digital-art',
-      mood: 'professional',
+      purpose: 'differentiator',
+      headline: 'Craft Meets Precision',
+      subheadline: `Every detail designed with intention — that\'s the difference`,
+      imagePrompt: `Extreme close-up of hands working on a craft, beautiful shallow depth of field, warm side lighting, professional ${ind} context, textured materials`,
+      style: 'cinematic',
+      mood: 'authentic',
       textColor: '#FFFFFF',
       transition: 'slide-left',
     },
     {
       purpose: 'promo',
-      headline: 'Special Offer',
-      subheadline: 'Limited time — don\'t miss out',
-      imagePrompt: `Eye-catching promotional background, bold dynamic composition, ${industry || 'retail'} marketing style, energetic and vibrant`,
-      style: 'digital-art',
-      mood: 'energetic',
+      headline: 'This Week Only',
+      subheadline: 'Ask about our featured special before it\'s gone',
+      imagePrompt: `Bold vibrant ${ind} product showcase, dramatic top-down lighting, rich saturated colors, clean dark background, commercial photography style`,
+      style: 'photographic',
+      mood: 'urgent',
       textColor: '#FFFFFF',
       transition: 'zoom',
     },
     {
       purpose: 'atmosphere',
-      headline: 'Experience Excellence',
-      subheadline: 'Crafted with care, delivered with pride',
-      imagePrompt: `Beautiful cinematic ${industry || 'lifestyle'} scene, premium quality feel, soft bokeh background, elegant composition`,
+      headline: 'Stay A While',
+      subheadline: 'Great spaces make great moments — pull up a seat',
+      imagePrompt: `Wide angle cozy ${ind} interior at dusk, warm ambient lighting, bokeh string lights, people-shaped shadows suggesting life, inviting seating area`,
       style: 'cinematic',
-      mood: 'premium',
+      mood: 'warm',
       textColor: '#FFFFFF',
       transition: 'fade',
     },
     {
       purpose: 'cta',
-      headline: 'Visit Us Today',
-      subheadline: 'Your journey starts here',
-      imagePrompt: `Inspiring landscape or cityscape at golden hour, warm inviting tones, open road or pathway, ${industry || 'business'} context`,
+      headline: 'Walk In Anytime',
+      subheadline: 'No appointment needed — we\'re ready when you are',
+      imagePrompt: `Welcoming storefront entrance at golden hour, warm light spilling from doorway, clean modern exterior, inviting pathway, ${ind} signage context`,
       style: 'photographic',
-      mood: 'inspiring',
+      mood: 'welcoming',
       textColor: '#FFFFFF',
       transition: 'slide-right',
     },
