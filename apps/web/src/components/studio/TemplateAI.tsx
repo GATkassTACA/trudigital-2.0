@@ -108,6 +108,7 @@ export default function TemplateAI({ preset }: TemplateAIProps) {
 
   /**
    * Composite text onto background image using off-screen canvas
+   * Professional signage-quality text rendering with shadows and outlines
    */
   const compositeSlide = async (slide: SlideData): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -124,35 +125,75 @@ export default function TemplateAI({ preset }: TemplateAIProps) {
         // Draw background
         ctx.drawImage(img, 0, 0);
 
-        // Semi-transparent dark band at bottom 40%
-        const bandTop = canvas.height * 0.6;
-        const gradient = ctx.createLinearGradient(0, bandTop - 40, 0, canvas.height);
+        // Full-height gradient overlay for guaranteed readability
+        const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
         gradient.addColorStop(0, 'rgba(0, 0, 0, 0)');
-        gradient.addColorStop(0.15, 'rgba(0, 0, 0, 0.6)');
-        gradient.addColorStop(1, 'rgba(0, 0, 0, 0.8)');
+        gradient.addColorStop(0.4, 'rgba(0, 0, 0, 0.05)');
+        gradient.addColorStop(0.6, 'rgba(0, 0, 0, 0.3)');
+        gradient.addColorStop(0.8, 'rgba(0, 0, 0, 0.7)');
+        gradient.addColorStop(1, 'rgba(0, 0, 0, 0.85)');
         ctx.fillStyle = gradient;
-        ctx.fillRect(0, bandTop - 40, canvas.width, canvas.height - bandTop + 40);
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-        const textColor = slide.textColor || '#FFFFFF';
-        const padding = canvas.width * 0.06;
+        const padding = canvas.width * 0.07;
         const maxWidth = canvas.width - padding * 2;
 
-        // Headline
-        const headlineSize = Math.round(canvas.height * 0.07);
-        ctx.font = `bold ${headlineSize}px sans-serif`;
-        ctx.fillStyle = textColor;
+        // Font stack — use system fonts that look professional on signage
+        const headlineFont = 'system-ui, "Segoe UI", "SF Pro Display", Roboto, Helvetica, Arial';
+        const bodyFont = 'system-ui, "Segoe UI", "SF Pro Text", Roboto, Helvetica, Arial';
+
+        // === HEADLINE ===
+        const headlineSize = Math.round(canvas.height * 0.09);
+        ctx.font = `800 ${headlineSize}px ${headlineFont}`;
         ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
 
-        const headlineY = bandTop + (canvas.height - bandTop) * 0.35;
-        wrapText(ctx, slide.headline, padding, headlineY, maxWidth, headlineSize * 1.2);
+        const headlineY = canvas.height * 0.62;
 
-        // Subheadline
-        const subSize = Math.round(canvas.height * 0.04);
-        ctx.font = `${subSize}px sans-serif`;
-        ctx.fillStyle = textColor + 'CC'; // slight transparency
+        // Text shadow (multiple passes for depth)
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.9)';
+        ctx.shadowBlur = headlineSize * 0.4;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = headlineSize * 0.06;
 
-        const subY = headlineY + headlineSize * 1.5;
-        wrapText(ctx, slide.subheadline, padding, subY, maxWidth, subSize * 1.3);
+        // Dark outline for contrast on any background
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.6)';
+        ctx.lineWidth = headlineSize * 0.06;
+        ctx.lineJoin = 'round';
+        wrapText(ctx, slide.headline.toUpperCase(), padding, headlineY, maxWidth, headlineSize * 1.15, true);
+
+        // Fill headline
+        ctx.fillStyle = '#FFFFFF';
+        wrapText(ctx, slide.headline.toUpperCase(), padding, headlineY, maxWidth, headlineSize * 1.15, false);
+
+        // === SUBHEADLINE ===
+        const headlineLines = getLineCount(ctx, slide.headline.toUpperCase(), maxWidth);
+        const subY = headlineY + (headlineSize * 1.15 * headlineLines) + headlineSize * 0.5;
+        const subSize = Math.round(canvas.height * 0.042);
+        ctx.font = `400 ${subSize}px ${bodyFont}`;
+
+        // Lighter shadow for subheadline
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
+        ctx.shadowBlur = subSize * 0.5;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = subSize * 0.05;
+
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)';
+        ctx.lineWidth = subSize * 0.05;
+        wrapText(ctx, slide.subheadline, padding, subY, maxWidth, subSize * 1.4, true);
+
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+        wrapText(ctx, slide.subheadline, padding, subY, maxWidth, subSize * 1.4, false);
+
+        // Reset shadow
+        ctx.shadowColor = 'transparent';
+        ctx.shadowBlur = 0;
+
+        // === ACCENT BAR — thin colored line above headline ===
+        const barY = headlineY - headlineSize * 0.4;
+        const barWidth = canvas.width * 0.12;
+        ctx.fillStyle = '#A855F7'; // purple accent
+        ctx.fillRect(padding, barY, barWidth, headlineSize * 0.07);
 
         resolve(canvas.toDataURL('image/png'));
       };
@@ -163,7 +204,26 @@ export default function TemplateAI({ preset }: TemplateAIProps) {
   };
 
   /**
-   * Simple canvas text wrapping
+   * Count lines text will wrap to (for positioning subheadline)
+   */
+  function getLineCount(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): number {
+    const words = text.split(' ');
+    let line = '';
+    let count = 1;
+    for (const word of words) {
+      const testLine = line + (line ? ' ' : '') + word;
+      if (ctx.measureText(testLine).width > maxWidth && line) {
+        count++;
+        line = word;
+      } else {
+        line = testLine;
+      }
+    }
+    return count;
+  }
+
+  /**
+   * Canvas text wrapping with stroke support
    */
   function wrapText(
     ctx: CanvasRenderingContext2D,
@@ -171,7 +231,8 @@ export default function TemplateAI({ preset }: TemplateAIProps) {
     x: number,
     y: number,
     maxWidth: number,
-    lineHeight: number
+    lineHeight: number,
+    stroke: boolean
   ) {
     const words = text.split(' ');
     let line = '';
@@ -180,14 +241,16 @@ export default function TemplateAI({ preset }: TemplateAIProps) {
     for (const word of words) {
       const testLine = line + (line ? ' ' : '') + word;
       if (ctx.measureText(testLine).width > maxWidth && line) {
-        ctx.fillText(line, x, currentY);
+        if (stroke) ctx.strokeText(line, x, currentY);
+        else ctx.fillText(line, x, currentY);
         line = word;
         currentY += lineHeight;
       } else {
         line = testLine;
       }
     }
-    ctx.fillText(line, x, currentY);
+    if (stroke) ctx.strokeText(line, x, currentY);
+    else ctx.fillText(line, x, currentY);
   }
 
   const handleSavePlaylist = async () => {
@@ -514,15 +577,20 @@ export default function TemplateAI({ preset }: TemplateAIProps) {
                     alt={slide.headline}
                     className="w-full h-full object-cover"
                   />
-                  {/* Text overlay */}
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
-                  <div className="absolute bottom-0 left-0 right-0 p-4">
+                  {/* Gradient overlay — matches canvas composite */}
+                  <div
+                    className="absolute inset-0"
+                    style={{
+                      background: 'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.05) 40%, rgba(0,0,0,0.3) 60%, rgba(0,0,0,0.7) 80%, rgba(0,0,0,0.85) 100%)',
+                    }}
+                  />
+                  <div className="absolute bottom-0 left-0 right-0 p-5">
                     {editingSlide === index ? (
                       <div className="space-y-2">
                         <input
                           value={slide.headline}
                           onChange={(e) => updateSlideText(index, 'headline', e.target.value)}
-                          className="w-full bg-black/50 border border-white/30 rounded px-2 py-1 text-white font-bold text-lg focus:outline-none focus:border-purple-400"
+                          className="w-full bg-black/50 border border-white/30 rounded px-2 py-1 text-white font-extrabold text-lg uppercase tracking-wide focus:outline-none focus:border-purple-400"
                           autoFocus
                         />
                         <input
@@ -542,15 +610,24 @@ export default function TemplateAI({ preset }: TemplateAIProps) {
                         className="cursor-pointer"
                         onClick={() => setEditingSlide(index)}
                       >
+                        {/* Accent bar */}
+                        <div className="w-10 h-0.5 bg-purple-500 mb-2" />
                         <h3
-                          className="font-bold text-lg leading-tight mb-1"
-                          style={{ color: slide.textColor || '#FFFFFF' }}
+                          className="font-extrabold text-xl leading-tight mb-1.5 uppercase tracking-wide"
+                          style={{
+                            color: '#FFFFFF',
+                            textShadow: '0 2px 8px rgba(0,0,0,0.9), 0 1px 3px rgba(0,0,0,0.8)',
+                            WebkitTextStroke: '0.3px rgba(0,0,0,0.3)',
+                          }}
                         >
                           {slide.headline}
                         </h3>
                         <p
-                          className="text-sm opacity-80"
-                          style={{ color: slide.textColor || '#FFFFFF' }}
+                          className="text-sm leading-relaxed"
+                          style={{
+                            color: 'rgba(255,255,255,0.9)',
+                            textShadow: '0 1px 6px rgba(0,0,0,0.8), 0 1px 2px rgba(0,0,0,0.7)',
+                          }}
                         >
                           {slide.subheadline}
                         </p>
