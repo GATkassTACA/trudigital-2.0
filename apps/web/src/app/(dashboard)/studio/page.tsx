@@ -18,13 +18,17 @@ import {
   Brain,
   Lightbulb,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  FolderOpen,
+  X
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { generate, content } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import EnhancedEditor from '@/components/editor/EnhancedEditor';
 import CanvaIntegration from '@/components/editor/CanvaIntegration';
+import AutoDesign from '@/components/studio/AutoDesign';
+import TemplateAI from '@/components/studio/TemplateAI';
 
 const PRESETS = [
   { id: 'landscape-standard', name: 'Landscape', icon: Monitor, size: '1344×768', width: 1344, height: 768 },
@@ -59,7 +63,7 @@ interface Enhancement {
   enhancedPrompt: string;
 }
 
-type Tab = 'generate' | 'editor';
+type Tab = 'generate' | 'autodesign' | 'templateai' | 'editor';
 
 export default function StudioPage() {
   const searchParams = useSearchParams();
@@ -82,11 +86,48 @@ export default function StudioPage() {
   const [images, setImages] = useState<GeneratedImage[]>([]);
   const [selectedImage, setSelectedImage] = useState<GeneratedImage | null>(null);
   const [editorImage, setEditorImage] = useState<string | null>(null);
+  const [editorLayers, setEditorLayers] = useState<{ logo?: string; text?: string } | null>(null);
   const [smartPrompts, setSmartPrompts] = useState(true);
   const [enhancement, setEnhancement] = useState<Enhancement | null>(null);
   const [showEnhancement, setShowEnhancement] = useState(false);
 
+  // Library picker state
+  const [showLibraryPicker, setShowLibraryPicker] = useState(false);
+  const [libraryContent, setLibraryContent] = useState<any[]>([]);
+  const [libraryLoading, setLibraryLoading] = useState(false);
+
   const currentPreset = PRESETS.find(p => p.id === preset) || PRESETS[0];
+
+  // Fetch library content
+  const fetchLibrary = async () => {
+    setLibraryLoading(true);
+    try {
+      const response = await content.list();
+      const images = (response.data.content || []).filter(
+        (item: any) => item.type === 'IMAGE'
+      );
+      setLibraryContent(images);
+    } catch (error) {
+      console.error('Failed to fetch library:', error);
+      toast.error('Failed to load content library');
+    } finally {
+      setLibraryLoading(false);
+    }
+  };
+
+  const openLibraryPicker = () => {
+    setShowLibraryPicker(true);
+    fetchLibrary();
+  };
+
+  const selectFromLibrary = (item: any) => {
+    const imageUrl = item.url.startsWith('/')
+      ? `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}${item.url}`
+      : item.url;
+    setEditorImage(imageUrl);
+    setShowLibraryPicker(false);
+    toast.success(`Loaded "${item.name}"`);
+  };
 
   const handleGenerate = async () => {
     if (!prompt.trim()) {
@@ -228,6 +269,33 @@ export default function StudioPage() {
               Generate
             </button>
             <button
+              onClick={() => handleTabChange('autodesign')}
+              className={cn(
+                'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition relative',
+                activeTab === 'autodesign'
+                  ? 'bg-gradient-to-r from-purple-500 to-pink-500 text-white'
+                  : 'text-gray-400 hover:text-white'
+              )}
+            >
+              <Wand2 className="w-4 h-4" />
+              Auto-Design
+            </button>
+            <button
+              onClick={() => handleTabChange('templateai')}
+              className={cn(
+                'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition relative',
+                activeTab === 'templateai'
+                  ? 'bg-gradient-to-r from-purple-500 to-pink-500 text-white'
+                  : 'text-gray-400 hover:text-white'
+              )}
+            >
+              <Sparkles className="w-4 h-4" />
+              Template AI
+              <span className="absolute -top-1 -right-1 px-1.5 py-0.5 bg-gradient-to-r from-yellow-400 to-orange-400 text-[10px] font-bold text-black rounded">
+                NEW
+              </span>
+            </button>
+            <button
               onClick={() => handleTabChange('editor')}
               className={cn(
                 'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition',
@@ -253,7 +321,20 @@ export default function StudioPage() {
         </div>
       </div>
 
-      {activeTab === 'generate' ? (
+      {activeTab === 'templateai' ? (
+        /* Template AI Tab */
+        <TemplateAI preset={preset} />
+      ) : activeTab === 'autodesign' ? (
+        /* Auto-Design Tab */
+        <AutoDesign
+          preset={preset}
+          onSelectDesign={(imageUrl, layers) => {
+            setEditorImage(imageUrl);
+            setEditorLayers(layers || null);
+            handleTabChange('editor');
+          }}
+        />
+      ) : activeTab === 'generate' ? (
         <div className="grid lg:grid-cols-2 gap-8">
           {/* Left: Controls */}
           <div className="space-y-6">
@@ -559,7 +640,7 @@ export default function StudioPage() {
               <ImageIcon className="w-16 h-16 text-gray-600 mx-auto mb-4" />
               <h3 className="text-lg font-medium text-white mb-2">Start with an image</h3>
               <p className="text-gray-400 mb-6">
-                Generate an AI image, start blank, or design in Canva
+                Generate an AI image, use from library, start blank, or design in Canva
               </p>
               <div className="flex items-center justify-center gap-4 flex-wrap">
                 <button
@@ -568,6 +649,13 @@ export default function StudioPage() {
                 >
                   <Sparkles className="w-5 h-5" />
                   Generate with AI
+                </button>
+                <button
+                  onClick={openLibraryPicker}
+                  className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition"
+                >
+                  <FolderOpen className="w-5 h-5" />
+                  From Library
                 </button>
                 <button
                   onClick={() => setEditorImage('')}
@@ -617,8 +705,60 @@ export default function StudioPage() {
               width={currentPreset.width}
               height={currentPreset.height}
               onSave={handleSaveFromEditor}
+              initialLayers={editorLayers || undefined}
             />
           )}
+        </div>
+      )}
+
+      {/* Library Picker Modal */}
+      {showLibraryPicker && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+          <div className="bg-gray-800 rounded-xl p-6 w-[700px] max-w-[90vw] max-h-[80vh] overflow-hidden flex flex-col">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                <FolderOpen className="w-6 h-6 text-brand-400" />
+                Select from Content Library
+              </h3>
+              <button onClick={() => setShowLibraryPicker(false)} className="p-2 hover:bg-gray-700 rounded-lg">
+                <X className="w-5 h-5 text-gray-400" />
+              </button>
+            </div>
+            <p className="text-gray-400 text-sm mb-4">Click an image to use it as your canvas background</p>
+
+            <div className="flex-1 overflow-y-auto">
+              {libraryLoading ? (
+                <div className="flex items-center justify-center py-16">
+                  <Loader2 className="w-10 h-10 text-brand-400 animate-spin" />
+                </div>
+              ) : libraryContent.length === 0 ? (
+                <div className="text-center py-16">
+                  <ImageIcon className="w-16 h-16 text-gray-600 mx-auto mb-4" />
+                  <p className="text-gray-400 text-lg">No images in your library</p>
+                  <p className="text-gray-500 text-sm mt-2">Upload images in the Content section first</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-3 gap-4">
+                  {libraryContent.map((item) => (
+                    <button
+                      key={item.id}
+                      onClick={() => selectFromLibrary(item)}
+                      className="group relative aspect-video bg-gray-900 rounded-lg overflow-hidden border-2 border-transparent hover:border-brand-500 transition"
+                    >
+                      <img
+                        src={item.url.startsWith('/') ? `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}${item.url}` : item.url}
+                        alt={item.name}
+                        className="w-full h-full object-cover"
+                      />
+                      <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition flex items-end p-3">
+                        <span className="text-white text-sm font-medium truncate w-full">{item.name}</span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>

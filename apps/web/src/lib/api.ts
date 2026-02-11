@@ -211,3 +211,15 @@ export const schedules = {
   getActive: (displayId: string) => api.get(`/api/schedules/active/${displayId}`),
   presets: () => api.get('/api/schedules/presets/list'),
 };
+
+// Template AI API
+export const templateai = {
+  generate: (data: {
+    businessDescription: string;
+    industry?: string;
+    vibe?: string;
+    slideCount?: number;
+    preset?: string;
+    playlistName?: string;
+  }) => api.post('/api/template-ai/generate', data),
+};

@@ -14,6 +14,7 @@ import weatherRoutes from './routes/weather';
 import autodesignRoutes from './routes/autodesign';
 import brandkitRoutes from './routes/brandkit';
 import schedulesRoutes from './routes/schedules';
+import templateaiRoutes from './routes/templateai';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -92,6 +93,7 @@ app.use('/api/playlists', playlistRoutes);
 app.use('/api/weather', weatherRoutes);
 app.use('/api/brandkit', brandkitRoutes);
 app.use('/api/schedules', schedulesRoutes);
+app.use('/api/template-ai', templateaiRoutes);
 
 // Error handler
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
