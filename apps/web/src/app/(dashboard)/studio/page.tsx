@@ -69,8 +69,9 @@ export default function StudioPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
-  // Get initial tab from URL or default to 'generate'
+  // Get initial tab and image from URL
   const initialTab = (searchParams.get('tab') as Tab) || 'generate';
+  const initialImage = searchParams.get('image');
   const [activeTab, setActiveTab] = useState<Tab>(initialTab);
   const [prompt, setPrompt] = useState('');
 
@@ -85,7 +86,7 @@ export default function StudioPage() {
   const [loading, setLoading] = useState(false);
   const [images, setImages] = useState<GeneratedImage[]>([]);
   const [selectedImage, setSelectedImage] = useState<GeneratedImage | null>(null);
-  const [editorImage, setEditorImage] = useState<string | null>(null);
+  const [editorImage, setEditorImage] = useState<string | null>(initialImage || null);
   const [editorLayers, setEditorLayers] = useState<{ logo?: string; text?: string } | null>(null);
   const [smartPrompts, setSmartPrompts] = useState(true);
   const [enhancement, setEnhancement] = useState<Enhancement | null>(null);
